@@ -34,6 +34,12 @@ type ProxyResponse struct {
 	PublicURL  string `json:"public_url"`
 }
 
+// LocalConnectFailed is a message from the client to the server
+// indicating that the client failed to connect to its local service.
+type LocalConnectFailed struct {
+	TunnelID string `json:"tunnel_id"`
+}
+
 // NewConnection is a message from the server to the client.
 // It signals that a new external connection has been made to the public port
 // and a new data tunnel should be established.

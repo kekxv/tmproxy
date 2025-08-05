@@ -136,17 +136,22 @@ func listenForNewConnections(controlConn *websocket.Conn, serverAddr, localAddr 
 			json.Unmarshal(payloadBytes, &newConnPayload)
 
 			log.Printf("Received new connection request for tunnel: %s", newConnPayload.TunnelID)
-			go handleNewTunnel(serverAddr, localAddr, newConnPayload.TunnelID)
+			go handleNewTunnel(controlConn, serverAddr, localAddr, newConnPayload.TunnelID)
 		}
 	}
 }
 
 // handleNewTunnel connects to the local service and establishes a new data WebSocket connection.
-func handleNewTunnel(serverAddr, localAddr, tunnelID string) {
+func handleNewTunnel(controlConn *websocket.Conn, serverAddr, localAddr, tunnelID string) {
 	// Connect to the local service.
 	localConn, err := net.Dial("tcp", localAddr)
 	if err != nil {
 		log.Printf("Failed to connect to local service at %s: %v", localAddr, err)
+		// Notify the server that the local connection failed.
+		msg := common.Message{Type: "local_connect_failed", Payload: common.LocalConnectFailed{TunnelID: tunnelID}}
+		if err := controlConn.WriteJSON(msg); err != nil {
+			log.Printf("Failed to send local connect failed message to server: %v", err)
+		}
 		return
 	}
 	defer localConn.Close()

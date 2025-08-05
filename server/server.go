@@ -225,6 +225,24 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			payloadBytes, _ := json.Marshal(msg.Payload)
 			json.Unmarshal(payloadBytes, &req)
 			go s.startProxyListener(conn, req.RemotePort)
+		} else if msg.Type == "local_connect_failed" {
+			var failedConn common.LocalConnectFailed
+			payloadBytes, _ := json.Marshal(msg.Payload)
+			json.Unmarshal(payloadBytes, &failedConn)
+			log.Printf("Client reported local connection failed for tunnel: %s. Cleaning up.", failedConn.TunnelID)
+
+			// Retrieve and close the public connection if it's still in the channel.
+			if tunnelChan, ok := s.activeTunnels[failedConn.TunnelID]; ok {
+				select {
+				case publicConn := <-tunnelChan:
+					publicConn.Close()
+					log.Printf("Closed public connection for tunnel %s due to client local connect failure.", failedConn.TunnelID)
+				default:
+					// Channel was empty, connection already handled or never put in.
+				}
+			}
+			delete(s.activeTunnels, failedConn.TunnelID)
+			log.Printf("Tunnel %s deleted due to local connection failure.", failedConn.TunnelID)
 		}
 	}
 }
@@ -322,6 +340,14 @@ func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string) {
 	case <-time.After(10 * time.Second):
 		// Timeout if the client doesn't connect the data tunnel in time.
 		log.Printf("Timeout waiting for data tunnel connection for ID: %s", tunnelID)
+		// Attempt to retrieve and close the public connection if it's still in the channel.
+		select {
+		case publicConn := <-tunnelChan:
+			publicConn.Close()
+			log.Printf("Closed timed-out public connection for tunnel %s.", tunnelID)
+		default:
+			// Channel was empty, connection already handled or never put in.
+		}
 		delete(s.activeTunnels, tunnelID)
 	}
 }
