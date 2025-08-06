@@ -99,6 +99,9 @@ func Run(args []string) {
 	http.HandleFunc("/api/admin/disconnect", server.requireAdminAuth(server.handleApiDisconnect))
 	http.HandleFunc("/api/admin/forwards", server.requireAdminAuth(server.handleAddForward))
 
+	// Start a goroutine to clean up disconnected clients
+	go server.cleanupDisconnectedClients()
+
 	log.Printf("Server starting on %s...", config.LISTEN_ADDR)
 	if config.TLS_CERT_FILE != "" && config.TLS_KEY_FILE != "" {
 		log.Printf("Using TLS certificates: %s and %s", config.TLS_CERT_FILE, config.TLS_KEY_FILE)
@@ -110,23 +113,20 @@ func Run(args []string) {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}
+}
 
-	// Start a goroutine to clean up disconnected clients
-	go func(s *Server) {
-		for {
-			time.Sleep(10 * time.Second) // Check every 10 seconds
-			s.mu.Lock()
-			for clientID, info := range s.disconnectedClients {
-				if time.Since(info.DisconnectedAt) > 30*time.Second {
-					log.Printf("Cleaning up expired disconnected client: %s", clientID)
-					delete(s.disconnectedClients, clientID)
-				}
+func (s *Server) cleanupDisconnectedClients() {
+	for {
+		time.Sleep(10 * time.Second) // Check every 10 seconds
+		s.mu.Lock()
+		for clientID, info := range s.disconnectedClients {
+			if time.Since(info.DisconnectedAt) > 30*time.Second {
+				log.Printf("Cleaning up expired disconnected client: %s", clientID)
+				delete(s.disconnectedClients, clientID)
 			}
-			s.mu.Unlock()
 		}
-	}(server)
-
-	select {}
+		s.mu.Unlock()
+	}
 }
 
 func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
@@ -243,7 +243,6 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 	authSuccess, authReq := s.authenticateClient(conn)
 	if !authSuccess {
 		// Authentication failed, send error response and close connection
-
 		return
 	}
 
@@ -317,32 +316,13 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 		}
 	}()
 
-	defer func() {
-		s.mu.Lock()
-		// Close all listeners associated with this client immediately
-		for _, listener := range clientInfo.Listeners {
-			listener.Close()
-		}
-		// Close the send channel to stop the write goroutine
-		close(clientInfo.sendChan)
-
-		// Move client to disconnectedClients map with timestamp
-		s.disconnectedClients[clientInfo.ID] = &DisconnectedClientInfo{
-			ClientInfo:     clientInfo,
-			DisconnectedAt: time.Now(),
-		}
-		delete(s.clients, clientInfo.ID)
-		delete(s.connToClientID, conn)
-		s.mu.Unlock()
-		log.Printf("handleControlChannel: Client %s disconnected from %s", clientInfo.ID, conn.RemoteAddr())
-	}()
-
+	// Loop to read messages from the client
 	for {
 		var msg common.Message
 		log.Printf("handleControlChannel: Client %s waiting for message...", clientInfo.ID)
 		if err := conn.ReadJSON(&msg); err != nil {
 			log.Printf("handleControlChannel: Error reading JSON from client %s: %v", clientInfo.ID, err)
-			break
+			break // Exit loop on error
 		}
 		log.Printf("handleControlChannel: Client %s received message type: %s", clientInfo.ID, msg.Type)
 
@@ -385,6 +365,25 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			s.mu.Unlock() // Release lock
 		}
 	}
+
+	// Cleanup after the loop exits
+	s.mu.Lock()
+	// Close all listeners associated with this client immediately
+	for _, listener := range clientInfo.Listeners {
+		listener.Close()
+	}
+	// Close the send channel to stop the write goroutine
+	close(clientInfo.sendChan)
+
+	// Move client to disconnectedClients map with timestamp
+	s.disconnectedClients[clientInfo.ID] = &DisconnectedClientInfo{
+		ClientInfo:     clientInfo,
+		DisconnectedAt: time.Now(),
+	}
+	delete(s.clients, clientInfo.ID)
+	delete(s.connToClientID, conn)
+	s.mu.Unlock()
+	log.Printf("handleControlChannel: Client %s disconnected from %s", clientInfo.ID, conn.RemoteAddr())
 }
 
 func (s *Server) authenticateClient(conn *websocket.Conn) (bool, common.AuthRequest) {
