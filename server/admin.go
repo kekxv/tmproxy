@@ -90,6 +90,12 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 			button:hover { background-color: #0056b3; }
 			button.disconnect { background-color: #dc3545; }
 			button.disconnect:hover { background-color: #c82333; }
+			.forwards-cell {
+				white-space: normal;
+				word-wrap: break-word;
+				max-width: 200px;
+				font-size: 0.85em;
+			}
 		</style>
 	</head>
 	<body>
@@ -132,9 +138,9 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 				const clientsTbody = document.getElementById("clients-table").querySelector("tbody");
 				clientsTbody.innerHTML = "";
 				for (const client of clients) {
-					const forwards = Object.entries(client.forwards).map(([remote, local]) => remote + " -> " + local).join(", ");
+					const forwards = Object.entries(client.forwards).map(([remote, local]) => remote + " -> " + local).join("<br/> ");
 					const row = clientsTbody.insertRow();
-					row.innerHTML = '<td>' + client.id + '</td><td>' + client.remote_addr + '</td><td>' + new Date(client.connected_at).toLocaleString() + '</td><td>' + forwards + '</td><td><button onclick="addForward(\'' + client.id + '\')">Add Forward</button> <button onclick="disconnect(\'' + client.id + '\', \'client\')">Disconnect</button></td>';
+					row.innerHTML = '<td>' + client.id + '</td><td>' + client.remote_addr + '</td><td>' + new Date(client.connected_at).toLocaleString() + '</td><td class="forwards-cell">' + forwards + '</td><td><button onclick="addForward(\'' + client.id + '\')">Add Forward</button> <button onclick="disconnect(\'' + client.id + '\', \'client\')">Disconnect</button></td>';
 				}
 
 				const connectionsRes = await fetch("/api/admin/connections");
