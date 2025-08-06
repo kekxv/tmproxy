@@ -23,9 +23,8 @@ import (
 
 // ClientState holds the dynamic state of the client's forwarding configuration.
 type ClientState struct {
-	mu         sync.RWMutex
-	LocalAddr  string
-	RemotePort int
+	mu       sync.RWMutex
+	Forwards map[int]string // Map of remote port to local address
 }
 
 // Run starts the client mode of the application.
@@ -38,7 +37,6 @@ func Run(args []string) {
 	localAddr := fs.String("local", "localhost:3000", "Local service address to expose")
 	remotePort := fs.Int("remote", 8080, "Requested public port on the server")
 	totpSecret := fs.String("totp-secret", "", "TOTP secret key for long-term authentication")
-	controlByServer := fs.Bool("control-by-server", false, "Let the server control local and remote addresses")
 	fs.Parse(args)
 
 	if *serverAddr == "" {
@@ -46,8 +44,7 @@ func Run(args []string) {
 	}
 
 	clientState := &ClientState{
-		LocalAddr:  *localAddr,
-		RemotePort: *remotePort,
+		Forwards: make(map[int]string),
 	}
 
 	// Prompt for the TOTP token if no secret is provided. This is done once.
@@ -107,21 +104,22 @@ func Run(args []string) {
 
 		log.Println("Authentication successful.")
 
-		if !*controlByServer {
-			log.Printf("Sending proxy request for local service %s...", clientState.LocalAddr)
-			if err := requestProxy(controlConn, clientState.RemotePort); err != nil {
-				log.Printf("Failed to request proxy: %v. Retrying in 5 seconds...", err)
-				controlConn.Close()
-				time.Sleep(5 * time.Second)
-				continue
-			}
-			log.Printf("Proxy requested for local service %s. Waiting for connections...", clientState.LocalAddr)
-		} else {
-			log.Println("Client is controlled by server. Waiting for server to assign forwarding targets...")
+		// Reset state on successful connection and send initial proxy request
+		clientState.mu.Lock()
+		clientState.Forwards = make(map[int]string)
+		clientState.Forwards[*remotePort] = *localAddr
+		clientState.mu.Unlock()
+
+		log.Printf("Sending initial proxy request for remote port %d -> local %s...", *remotePort, *localAddr)
+		if err := requestProxy(controlConn, *remotePort, *localAddr); err != nil {
+			log.Printf("Failed to request proxy: %v. Retrying in 5 seconds...", err)
+			controlConn.Close()
+			time.Sleep(5 * time.Second)
+			continue
 		}
 
 		// This function blocks until the connection is lost or the context is cancelled.
-		listenForNewConnections(ctx, controlConn, *serverAddr, clientState, *controlByServer)
+		listenForNewConnections(ctx, controlConn, *serverAddr, clientState)
 
 		// After listenForNewConnections returns, the connection is considered lost.
 		controlConn.Close()
@@ -177,8 +175,8 @@ func authenticate(conn *websocket.Conn, token, totpSecret string) error {
 }
 
 // requestProxy sends a request to the server to open a public port.
-func requestProxy(conn *websocket.Conn, remotePort int) error {
-	req := common.Message{Type: "proxy_request", Payload: common.ProxyRequest{RemotePort: remotePort}}
+func requestProxy(conn *websocket.Conn, remotePort int, localAddr string) error {
+	req := common.Message{Type: "proxy_request", Payload: common.ProxyRequest{RemotePort: remotePort, LocalAddr: localAddr}}
 	if err := conn.WriteJSON(req); err != nil {
 		return fmt.Errorf("failed to send proxy request: %w", err)
 	}
@@ -205,8 +203,8 @@ func requestProxy(conn *websocket.Conn, remotePort int) error {
 	return nil
 }
 
-// listenForNewConnections waits for `new_conn` messages and spawns goroutines to handle them.
-func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, serverAddr string, state *ClientState, controlByServer bool) {
+// listenForNewConnections waits for messages from the server and handles them.
+func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, serverAddr string, state *ClientState) {
 	msgChan := make(chan common.Message)
 	errChan := make(chan error, 1)
 
@@ -231,15 +229,12 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 			}
 
 			var msg common.Message
-			// ReadJSON will be interrupted by pongs, which reset the deadline via the pong handler.
-			// A timeout error here means the connection is genuinely stale.
 			if err := controlConn.ReadJSON(&msg); err != nil {
-				// Avoid logging an error if the context was cancelled during the read.
 				select {
 				case <-ctx.Done():
-					errChan <- nil // Signal graceful shutdown
+					errChan <- nil // Graceful shutdown
 				default:
-					errChan <- err // Signal a real error
+					errChan <- err // Real error
 				}
 				return
 			}
@@ -254,11 +249,9 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 		for {
 			select {
 			case <-ticker.C:
-				// Use WriteControl for ping messages. It's safe for concurrent use.
 				deadline := time.Now().Add(5 * time.Second)
 				if err := controlConn.WriteControl(websocket.PingMessage, nil, deadline); err != nil {
 					log.Printf("Pinger: Failed to send ping: %v", err)
-					// The read goroutine will eventually time out and report the connection error.
 					return
 				}
 			case <-ctx.Done():
@@ -272,8 +265,6 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 		select {
 		case <-ctx.Done():
 			log.Println("listenForNewConnections: Context cancelled. Shutting down.")
-			// Attempt a clean close of the websocket connection.
-			// The error is ignored as we are shutting down anyway.
 			controlConn.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
 			return
 		case err := <-errChan:
@@ -290,31 +281,25 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 			}
 			return
 		case msg := <-msgChan:
-			// Process application-level messages.
 			switch msg.Type {
 			case "new_conn":
 				var newConnPayload common.NewConnection
 				payloadBytes, _ := json.Marshal(msg.Payload)
 				json.Unmarshal(payloadBytes, &newConnPayload)
 
-				log.Printf("Received new connection request for tunnel: %s (Client ID: %s)", newConnPayload.TunnelID, newConnPayload.ClientID)
-				state.mu.RLock()
-				go handleNewTunnel(controlConn, serverAddr, state, newConnPayload.TunnelID, newConnPayload.ClientID)
-				state.mu.RUnlock()
-			case "update_forwarding":
-				if controlByServer {
-					var updatePayload common.UpdateForwarding
-					payloadBytes, _ := json.Marshal(msg.Payload)
-					json.Unmarshal(payloadBytes, &updatePayload)
+				log.Printf("Received new connection for remote port %d -> tunnel %s", newConnPayload.RemotePort, newConnPayload.TunnelID)
+				go handleNewTunnel(controlConn, serverAddr, state, newConnPayload.TunnelID, newConnPayload.ClientID, newConnPayload.RemotePort)
 
-					state.mu.Lock()
-					state.LocalAddr = fmt.Sprintf("%s:%d", updatePayload.RemoteHost, updatePayload.RemotePort)
-					state.RemotePort = updatePayload.RemotePort
-					state.mu.Unlock()
-					log.Printf("Server updated forwarding target to: %s", state.LocalAddr)
-				} else {
-					log.Println("Received update_forwarding message but client is not in server-controlled mode.")
-				}
+			case "add_proxy":
+				var addProxyPayload common.AddProxy
+				payloadBytes, _ := json.Marshal(msg.Payload)
+				json.Unmarshal(payloadBytes, &addProxyPayload)
+
+				state.mu.Lock()
+				state.Forwards[addProxyPayload.RemotePort] = addProxyPayload.LocalAddr
+				state.mu.Unlock()
+				log.Printf("Dynamically added new forward: remote port %d -> local %s", addProxyPayload.RemotePort, addProxyPayload.LocalAddr)
+
 			default:
 				log.Printf("Received unknown message type: %s", msg.Type)
 			}
@@ -323,16 +308,20 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 }
 
 // handleNewTunnel connects to the local service and establishes a new data WebSocket connection.
-func handleNewTunnel(controlConn *websocket.Conn, serverAddr string, state *ClientState, tunnelID string, clientID string) {
+func handleNewTunnel(controlConn *websocket.Conn, serverAddr string, state *ClientState, tunnelID string, clientID string, remotePort int) {
 	state.mu.RLock()
-	currentLocalAddr := state.LocalAddr
+	localAddr, ok := state.Forwards[remotePort]
 	state.mu.RUnlock()
 
+	if !ok {
+		log.Printf("[%s] No local address configured for remote port %d", tunnelID, remotePort)
+		return
+	}
+
 	// Connect to the local service.
-	localConn, err := net.Dial("tcp", currentLocalAddr)
+	localConn, err := net.Dial("tcp", localAddr)
 	if err != nil {
-		log.Printf("Failed to connect to local service at %s: %v", currentLocalAddr, err)
-		// Notify the server that the local connection failed.
+		log.Printf("Failed to connect to local service at %s: %v", localAddr, err)
 		msg := common.Message{Type: "local_connect_failed", Payload: common.LocalConnectFailed{TunnelID: tunnelID}}
 		if err := controlConn.WriteJSON(msg); err != nil {
 			log.Printf("Failed to send local connect failed message to server: %v", err)
@@ -341,7 +330,7 @@ func handleNewTunnel(controlConn *websocket.Conn, serverAddr string, state *Clie
 	}
 	defer localConn.Close()
 
-	log.Printf("[%s] Connected to local service %s. Establishing data tunnel...", tunnelID, currentLocalAddr)
+	log.Printf("[%s] Connected to local service %s. Establishing data tunnel...", tunnelID, localAddr)
 
 	// Construct the data tunnel URL with the tunnel ID and client ID.
 	u, _ := url.Parse(serverAddr)
