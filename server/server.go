@@ -144,43 +144,197 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 		<title>tmproxy Server</title>
 		<style>
 			body {
-				font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif, "Apple Color Emoji", "Segoe UI Emoji", "Segoe UI Symbol";
-				line-height: 1.6;
+				font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
 				margin: 0;
-				padding: 20px;
-				background-color: #f4f4f4;
+				padding: 0;
+				background-color: #f0f2f5; /* Light gray background */
 				color: #333;
+				line-height: 1.6;
 			}
 			.container {
-				max-width: 800px;
+				max-width: 1200px;
+				width: 95%%; /* Responsive width */
 				margin: 20px auto;
-				background: #fff;
 				padding: 30px;
-				border-radius: 8px;
-				box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+				background: #ffffff;
+				border-radius: 12px;
+				box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+				box-sizing: border-box;
 			}
-			h1, h2 {
-				color: #0056b3;
+			h1 {
+				text-align: center;
+				color: #2c3e50;
+				margin-bottom: 40px;
+				font-size: 2.5em;
+				font-weight: 700;
 			}
-			pre {
-				background-color: #e9e9e9;
-				padding: 15px;
-				border-radius: 5px;
-				overflow-x: auto;
-				font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
+
+			/* Login Form Styles */
+			#login-section {
+				display: flex;
+				justify-content: center;
+				align-items: center;
+				position: fixed; /* Keep fixed for full viewport coverage */
+				top: 0;
+				left: 0;
+				width: 100%%;
+				height: 100%%; /* Use height: 100% for full viewport height */
+				background-color: #f0f2f5;
+				z-index: 1000;
 			}
-			code {
-				font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, Courier, monospace;
-				background-color: #e0e0e0;
-				padding: 2px 4px;
-				border-radius: 3px;
+			.login-form {
+				background: #ffffff;
+				padding: 40px;
+				border-radius: 12px;
+				box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+				width: 100%%;
+				max-width: 400px; /* Fixed width for card */
+				text-align: center;
+				box-sizing: border-box;
 			}
-			a {
-				color: #0056b3;
-				text-decoration: none;
+			.login-form h1 {
+				color: #34495e;
+				margin-bottom: 30px;
+				font-size: 2.2em;
+				font-weight: 600;
 			}
-			a:hover {
-				text-decoration: underline;
+			.input-group {
+				margin-bottom: 20px;
+				text-align: left;
+				display: block; /* Ensure each input group is on its own line */
+			}
+			.input-group label {
+				display: block;
+				margin-bottom: 8px;
+				color: #555;
+				font-size: 0.95em;
+				font-weight: 500;
+			}
+			.input-group input[type="text"], .input-group input[type="password"] {
+				width: 100%%;
+				padding: 12px 15px;
+				border: 1px solid #ddd;
+				border-radius: 8px; /* Slightly more rounded */
+				box-sizing: border-box;
+				font-size: 1em;
+				transition: border-color 0.3s ease, box-shadow 0.3s ease;
+			}
+			.input-group input[type="text"]:focus, .input-group input[type="password"]:focus {
+				border-color: #007bff;
+				box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+				outline: none;
+			}
+			.login-form button {
+				background-color: #007bff;
+				color: white;
+				padding: 12px 25px;
+				border: none;
+				border-radius: 8px; /* Slightly more rounded */
+				cursor: pointer;
+				font-size: 1.1em;
+				font-weight: 600;
+				transition: background-color 0.3s ease, transform 0.2s ease;
+				width: 100%%; /* Full width button */
+				margin-top: 10px;
+			}
+			.login-form button:hover {
+				background-color: #0056b3;
+				transform: translateY(-2px);
+			}
+			.error-message {
+				color: #e74c3c;
+				margin-bottom: 15px;
+				font-weight: bold;
+				font-size: 0.9em;
+			}
+
+			/* Dashboard Styles */
+			#dashboard-content {
+				display: none; /* Hidden by default */
+			}
+			.dashboard-section {
+				margin-top: 40px;
+				padding-top: 30px;
+				border-top: 1px solid #eee;
+			}
+			.dashboard-section h2 {
+				color: #34495e;
+				margin-bottom: 25px;
+				font-size: 1.8em;
+				font-weight: 600;
+				border-bottom: 3px solid #007bff; /* Thicker underline */
+				display: inline-block;
+				padding-bottom: 8px;
+			}
+			table {
+				width: 100%%;
+				border-collapse: separate; /* Use separate for rounded corners */
+				border-spacing: 0;
+				margin-top: 20px;
+				box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+				border-radius: 10px;
+				overflow: hidden; /* Ensures rounded corners apply to table */
+			}
+			th, td {
+				border: none; /* Remove individual cell borders */
+				padding: 15px 20px; /* More padding */
+				text-align: left;
+			}
+			th {
+				background-color: #e9ecef; /* Lighter header background */
+				color: #495057;
+				font-weight: 600;
+				text-transform: uppercase;
+				font-size: 0.9em;
+				border-bottom: 1px solid #dee2e6;
+			}
+			td {
+				border-bottom: 1px solid #f0f2f5; /* Lighter row separator */
+			}
+			tr:last-child td {
+				border-bottom: none; /* No border for the last row */
+			}
+			tr:nth-child(even) {
+				background-color: #f8f9fa; /* Very light alternate row */
+			}
+			tr:hover {
+				background-color: #e2e6ea; /* Subtle hover effect */
+			}
+			.action-button {
+				background-color: #dc3545; /* Red for disconnect */
+				color: white;
+				border: none;
+				padding: 8px 15px;
+				border-radius: 6px;
+				cursor: pointer;
+				font-size: 0.9em;
+				font-weight: 500;
+				transition: background-color 0.3s ease, transform 0.2s ease;
+			}
+			.action-button:hover {
+				background-color: #c82333;
+				transform: translateY(-1px);
+			}
+			/* Responsive adjustments */
+			@media (max-width: 768px) {
+				.container {
+					margin: 10px auto;
+					padding: 20px;
+				}
+				.login-form {
+					padding: 30px;
+				}
+				.dashboard-section h2 {
+					font-size: 1.5em;
+				}
+				th, td {
+					padding: 10px 12px;
+					font-size: 0.85em;
+				}
+				.action-button {
+					padding: 6px 10px;
+					font-size: 0.8em;
+				}
 			}
 		</style>
 	</head>
@@ -581,37 +735,231 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<title>Admin Dashboard</title>
 		<style>
-			body { font-family: sans-serif; margin: 20px; }
-			.container { max-width: 900px; margin: auto; }
-			h1 { color: #333; }
-			.login-form { background: #f9f9f9; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
-			.login-form input[type="text"], .login-form input[type="password"] { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
-			.login-form button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
-			.login-form button:hover { background-color: #0056b3; }
-			.error-message { color: red; margin-bottom: 10px; }
-			.dashboard-section { margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px; }
-			table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-			th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-			th { background-color: #f2f2f2; }
-			.action-button { background-color: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
-			.action-button:hover { background-color: #c82333; }
+			body {
+				font-family: 'Inter', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol';
+				margin: 0;
+				padding: 0;
+				background-color: #f0f2f5; /* Light gray background */
+				color: #333;
+				line-height: 1.6;
+			}
+			.container {
+				max-width: 1200px;
+				width: 95%%; /* Responsive width */
+				margin: 20px auto;
+				padding: 30px;
+				background: #ffffff;
+				border-radius: 12px;
+				box-shadow: 0 10px 30px rgba(0, 0, 0, 0.08);
+				box-sizing: border-box;
+			}
+			h1 {
+				text-align: center;
+				color: #2c3e50;
+				margin-bottom: 40px;
+				font-size: 2.5em;
+				font-weight: 700;
+			}
+
+			/* Login Form Styles */
+			#login-section {
+				display: flex;
+				justify-content: center;
+				align-items: center;
+				min-height: 100vh; /* Full viewport height for login */
+				width: 100%%; /* Take full width */
+				position: fixed; /* Position fixed to cover entire screen */
+				top: 0;
+				left: 0;
+				background-color: #f0f2f5; /* Match body background */
+				z-index: 1000; /* Ensure it's on top */
+			}
+			.login-form {
+				background: #ffffff;
+				padding: 40px;
+				border-radius: 12px;
+				box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+				width: 25em;
+				height: 33em;
+				text-align: center;
+				box-sizing: border-box;
+				margin: auto;
+				left: 0;
+				right: 0;
+				top: 0;
+				bottom: 0;
+				position: fixed;
+			}
+			.login-form h1 {
+				color: #34495e;
+				margin-bottom: 30px;
+				font-size: 2.2em;
+				font-weight: 600;
+			}
+			.input-group {
+				margin-bottom: 20px;
+				text-align: left;
+				display: block; /* Ensure each input group is on its own line */
+			}
+			.input-group label {
+				display: block;
+				margin-bottom: 8px;
+				color: #555;
+				font-size: 0.95em;
+				font-weight: 500;
+			}
+			.input-group input[type="text"], .input-group input[type="password"] {
+				width: 100%%;
+				padding: 12px 15px;
+				border: 1px solid #ddd;
+				border-radius: 8px; /* Slightly more rounded */
+				box-sizing: border-box;
+				font-size: 1em;
+				transition: border-color 0.3s ease, box-shadow 0.3s ease;
+			}
+			.input-group input[type="text"]:focus, .input-group input[type="password"]:focus {
+				border-color: #007bff;
+				box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.25);
+				outline: none;
+			}
+			.login-form button {
+				background-color: #007bff;
+				color: white;
+				padding: 12px 25px;
+				border: none;
+				border-radius: 8px; /* Slightly more rounded */
+				cursor: pointer;
+				font-size: 1.1em;
+				font-weight: 600;
+				transition: background-color 0.3s ease, transform 0.2s ease;
+				width: 100%%; /* Full width button */
+				margin-top: 10px;
+			}
+			.login-form button:hover {
+				background-color: #0056b3;
+				transform: translateY(-2px);
+			}
+			.error-message {
+				color: #e74c3c;
+				margin-bottom: 15px;
+				font-weight: bold;
+				font-size: 0.9em;
+			}
+
+			/* Dashboard Styles */
+			#dashboard-content {
+				display: none; /* Hidden by default */
+			}
+			.dashboard-section {
+				margin-top: 40px;
+				padding-top: 30px;
+				border-top: 1px solid #eee;
+			}
+			.dashboard-section h2 {
+				color: #34495e;
+				margin-bottom: 25px;
+				font-size: 1.8em;
+				font-weight: 600;
+				border-bottom: 3px solid #007bff; /* Thicker underline */
+				display: inline-block;
+				padding-bottom: 8px;
+			}
+			table {
+				width: 100%%;
+				border-collapse: separate; /* Use separate for rounded corners */
+				border-spacing: 0;
+				margin-top: 20px;
+				box-shadow: 0 5px 15px rgba(0, 0, 0, 0.05);
+				border-radius: 10px;
+				overflow: hidden; /* Ensures rounded corners apply to table */
+			}
+			th, td {
+				border: none; /* Remove individual cell borders */
+				padding: 15px 20px; /* More padding */
+				text-align: left;
+			}
+			th {
+				background-color: #e9ecef; /* Lighter header background */
+				color: #495057;
+				font-weight: 600;
+				text-transform: uppercase;
+				font-size: 0.9em;
+				border-bottom: 1px solid #dee2e6;
+			}
+			td {
+				border-bottom: 1px solid #f0f2f5; /* Lighter row separator */
+			}
+			tr:last-child td {
+				border-bottom: none; /* No border for the last row */
+			}
+			tr:nth-child(even) {
+				background-color: #f8f9fa; /* Very light alternate row */
+			}
+			tr:hover {
+				background-color: #e2e6ea; /* Subtle hover effect */
+			}
+			.action-button {
+				background-color: #dc3545; /* Red for disconnect */
+				color: white;
+				border: none;
+				padding: 8px 15px;
+				border-radius: 6px;
+				cursor: pointer;
+				font-size: 0.9em;
+				font-weight: 500;
+				transition: background-color 0.3s ease, transform 0.2s ease;
+			}
+			.action-button:hover {
+				background-color: #c82333;
+				transform: translateY(-1px);
+			}
+			/* Responsive adjustments */
+			@media (max-width: 768px) {
+				.container {
+					margin: 10px auto;
+					padding: 20px;
+				}
+				.login-form {
+					padding: 30px;
+				}
+				.dashboard-section h2 {
+					font-size: 1.5em;
+				}
+				th, td {
+					padding: 10px 12px;
+					font-size: 0.85em;
+				}
+				.action-button {
+					padding: 6px 10px;
+					font-size: 0.8em;
+				}
+			}
 		</style>
 	</head>
 	<body>
 		<div class="container">
-			<h1>Admin Dashboard</h1>
 			<div id="login-section">
 				<div class="login-form">
-					<h2>Login</h2>
+					<h1>Admin Login</h1>
 					<div id="login-error" class="error-message"></div>
-					<input type="text" id="username" placeholder="Username">
-					<input type="password" id="password" placeholder="Password">
-					<input type="text" id="totp" placeholder="TOTP (if enabled)">
+					<div class="input-group">
+						<label for="username">Username</label>
+						<input type="text" id="username" placeholder="Enter your username">
+					</div>
+					<div class="input-group">
+						<label for="password">Password</label>
+						<input type="password" id="password" placeholder="Enter your password">
+					</div>
+					<div class="input-group">
+						<label for="totp">TOTP (if enabled)</label>
+						<input type="text" id="totp" placeholder="Enter TOTP code">
+					</div>
 					<button onclick="login()">Login</button>
 				</div>
 			</div>
 
 			<div id="dashboard-content" style="display:none;">
+				<h1>Admin Dashboard</h1>
 				<div class="dashboard-section">
 					<h2>Connected Clients</h2>
 					<table id="clients-table">
