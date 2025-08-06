@@ -78,13 +78,22 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<title>Admin Dashboard</title>
 		<style>
-			body { font-family: sans-serif; margin: 2em; }
-			table { border-collapse: collapse; width: 100%; }
-			th, td { border: 1px solid #ddd; padding: 8px; }
-			th { background-color: #f2f2f2; }
+			body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f0f2f5; color: #333; }
+			.container { max-width: 1200px; margin: 2em auto; padding: 20px; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+			h1, h2 { color: #0056b3; border-bottom: 2px solid #eee; padding-bottom: 10px; margin-top: 1.5em; }
+			table { border-collapse: collapse; width: 100%; margin-top: 1em; box-shadow: 0 2px 8px rgba(0,0,0,0.05); border-radius: 8px; overflow: hidden; }
+			th, td { border: 1px solid #e0e0e0; padding: 12px 15px; text-align: left; }
+			th { background-color: #e9f5ff; font-weight: bold; color: #0056b3; }
+			tr:nth-child(even) { background-color: #f9f9f9; }
+			tr:hover { background-color: #f1f1f1; }
+			button { background-color: #007bff; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-size: 0.9em; transition: background-color 0.2s ease; margin-right: 5px; }
+			button:hover { background-color: #0056b3; }
+			button.disconnect { background-color: #dc3545; }
+			button.disconnect:hover { background-color: #c82333; }
 		</style>
 	</head>
 	<body>
+		<div class="container">
 		<h1>Admin Dashboard</h1>
 		<h2>Connected Clients</h2>
 		<table id="clients-table">
@@ -109,10 +118,12 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 					<th>Client Address</th>
 					<th>Server Address</th>
 					<th>Connected At</th>
+					<th>Actions</th>
 				</tr>
 			</thead>
 			<tbody></tbody>
 		</table>
+		</div>
 
 		<script>
 			async function fetchData() {
@@ -121,9 +132,9 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 				const clientsTbody = document.getElementById("clients-table").querySelector("tbody");
 				clientsTbody.innerHTML = "";
 				for (const client of clients) {
-					const forwards = Object.entries(client.forwards).map(([remote, local]) => `+"`${remote} -> ${local}`"+`).join(", ");
+					const forwards = Object.entries(client.forwards).map(([remote, local]) => remote + " -> " + local).join(", ");
 					const row = clientsTbody.insertRow();
-					row.innerHTML = '<td>' + client.id + '</td><td>' + client.remote_addr + '</td><td>' + new Date(client.connected_at).toLocaleString() + '</td><td>' + forwards + '</td><td><button onclick="addForward(\'' + client.id + '\')">Add Forward</button></td>';
+					row.innerHTML = '<td>' + client.id + '</td><td>' + client.remote_addr + '</td><td>' + new Date(client.connected_at).toLocaleString() + '</td><td>' + forwards + '</td><td><button onclick="addForward(\'' + client.id + '\')">Add Forward</button> <button onclick="disconnect(\'' + client.id + '\', \'client\')">Disconnect</button></td>';
 				}
 
 				const connectionsRes = await fetch("/api/admin/connections");
@@ -132,7 +143,7 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 				connectionsTbody.innerHTML = "";
 				for (const conn of connections) {
 					const row = connectionsTbody.insertRow();
-					row.innerHTML = '<td>' + conn.id + '</td><td>' + conn.tunnel_id + '</td><td>' + conn.client_addr + '</td><td>' + conn.server_addr + '</td><td>' + new Date(conn.connected_at).toLocaleString() + '</td>';
+					row.innerHTML = '<td>' + conn.id + '</td><td>' + conn.tunnel_id + '</td><td>' + conn.client_addr + '</td><td>' + conn.server_addr + '</td><td>' + new Date(conn.connected_at).toLocaleString() + '</td><td><button onclick="disconnect(\'' + conn.id + '\', \'connection\')">Disconnect</button></td>';
 				}
 			}
 
@@ -140,12 +151,33 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 				const remotePort = prompt("Enter remote port:");
 				const localAddr = prompt("Enter local address (e.g., localhost:3000):");
 				if (remotePort && localAddr) {
-					await fetch("/api/admin/forwards", {
+					const res = await fetch("/api/admin/forwards", {
 						method: "POST",
 						headers: { "Content-Type": "application/json" },
 						body: JSON.stringify({ client_id: clientId, remote_port: parseInt(remotePort), local_addr: localAddr })
 					});
-					fetchData();
+					if (res.ok) {
+						fetchData();
+					} else {
+						const errorData = await res.json();
+						alert(errorData.message || "Failed to add forward");
+					}
+				}
+			}
+
+			async function disconnect(id, type) {
+				if (confirm('Are you sure you want to disconnect this ' + type + '?')) {
+					const res = await fetch("/api/admin/disconnect", {
+						method: "POST",
+						headers: { "Content-Type": "application/json" },
+						body: JSON.stringify({ id, type })
+					});
+					if (res.ok) {
+						fetchData();
+					} else {
+						const errorData = await res.json();
+						alert(errorData.message || 'Failed to disconnect ' + type);
+					}
 				}
 			}
 
@@ -314,11 +346,28 @@ func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
 	case "client":
 		if client, ok := s.clients[req.ID]; ok {
 			client.Conn.Close()
+			delete(s.clients, req.ID)
+			delete(s.connToClientID, client.Conn)
+			for _, listener := range client.Listeners {
+				listener.Close()
+			}
 		}
 	case "connection":
-		for _, connInfo := range s.activeTCPConnections {
+		// Iterate through activeTCPConnections to find the matching connection by ID
+		// and remove it. Also clean up the corresponding activeTunnel.
+		for tunnelID, connInfo := range s.activeTCPConnections {
 			if connInfo.ID == req.ID {
 				connInfo.PublicConn.Close()
+				delete(s.activeTCPConnections, tunnelID)
+				// Also clean up the corresponding activeTunnel if it exists
+				if tunnelChan, ok := s.activeTunnels[tunnelID]; ok {
+					select {
+					case publicConn := <-tunnelChan:
+						publicConn.Close()
+					default:
+					}
+					delete(s.activeTunnels, tunnelID)
+				}
 				break
 			}
 		}
