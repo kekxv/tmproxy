@@ -30,9 +30,9 @@ func Proxy(conn net.Conn, ws *websocket.Conn) {
 		// Create a custom writer for the WebSocket connection.
 		wsWriter := &websocketWriter{ws: ws}
 		// Set read deadline for the network connection
-		conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+		conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 		// Set write deadline for the WebSocket connection
-		ws.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		ws.SetWriteDeadline(time.Now().Add(60 * time.Second))
 		if _, err := io.Copy(wsWriter, conn); err != nil {
 			log.Printf("Error copying from network to WebSocket: %v", err)
 		}
@@ -47,9 +47,9 @@ func Proxy(conn net.Conn, ws *websocket.Conn) {
 		// Create a custom reader for the WebSocket connection.
 		wsReader := &websocketReader{ws: ws}
 		// Set read deadline for the WebSocket connection
-		ws.SetReadDeadline(time.Now().Add(5 * time.Second))
+		ws.SetReadDeadline(time.Now().Add(60 * time.Second))
 		// Set write deadline for the network connection
-		conn.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		conn.SetWriteDeadline(time.Now().Add(60 * time.Second))
 		if _, err := io.Copy(conn, wsReader); err != nil {
 			log.Printf("Error copying from WebSocket to network: %v", err)
 		}

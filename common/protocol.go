@@ -10,14 +10,17 @@ type Message struct {
 // AuthRequest is the payload for an authentication request from the client.
 // It contains the TOTP code required for verification.
 type AuthRequest struct {
-	Token string `json:"token"`
+	Token    string `json:"token"`
+	ClientID string `json:"client_id"`
 }
 
 // AuthResponse is the payload for an authentication response from the server.
 // It indicates whether the authentication was successful.
 type AuthResponse struct {
-	Success bool   `json:"success"`
-	Message string `json:"message"`
+	Success  bool           `json:"success"`
+	Message  string         `json:"message"`
+	ClientID string         `json:"client_id"`
+	Forwards map[int]string `json:"forwards"`
 }
 
 // ProxyRequest is the payload for a client's request to start proxying.
@@ -25,6 +28,7 @@ type AuthResponse struct {
 type ProxyRequest struct {
 	RemotePort int    `json:"remote_port"`
 	LocalAddr  string `json:"local_addr"`
+	ClientID   string `json:"client_id"`
 }
 
 // ProxyResponse is the payload for the server's response to a proxy request.

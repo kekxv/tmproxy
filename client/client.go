@@ -25,6 +25,7 @@ import (
 type ClientState struct {
 	mu       sync.RWMutex
 	Forwards map[int]string // Map of remote port to local address
+	ClientID string         // Client's unique ID, assigned by server
 }
 
 // Run starts the client mode of the application.
@@ -45,6 +46,7 @@ func Run(args []string) {
 
 	clientState := &ClientState{
 		Forwards: make(map[int]string),
+		ClientID: "", // Initialize with empty ID
 	}
 
 	// Prompt for the TOTP token if no secret is provided. This is done once.
@@ -87,7 +89,9 @@ func Run(args []string) {
 		}
 
 		log.Println("Connected to server. Authenticating...")
-		if err := authenticate(controlConn, token, *totpSecret); err != nil {
+		// Pass clientState.ClientID to authenticate and update it from the response
+		newClientID, err := authenticate(controlConn, token, *totpSecret, clientState.ClientID, clientState)
+		if err != nil {
 			log.Printf("Authentication failed: %v", err)
 			// If the server explicitly rejected the authentication (e.g., bad token), exit.
 			if strings.Contains(err.Error(), "server rejected authentication") {
@@ -101,17 +105,17 @@ func Run(args []string) {
 			time.Sleep(5 * time.Second)
 			continue
 		}
+		clientState.ClientID = newClientID
 
 		log.Println("Authentication successful.")
 
 		// Reset state on successful connection and send initial proxy request
 		clientState.mu.Lock()
-		clientState.Forwards = make(map[int]string)
 		clientState.Forwards[*remotePort] = *localAddr
 		clientState.mu.Unlock()
 
 		log.Printf("Sending initial proxy request for remote port %d -> local %s...", *remotePort, *localAddr)
-		if err := requestProxy(controlConn, *remotePort, *localAddr); err != nil {
+		if err := requestProxy(controlConn, *remotePort, *localAddr, clientState.ClientID); err != nil {
 			log.Printf("Failed to request proxy: %v. Retrying in 5 seconds...", err)
 			controlConn.Close()
 			time.Sleep(5 * time.Second)
@@ -128,6 +132,7 @@ func Run(args []string) {
 		select {
 		case <-ctx.Done():
 			// Context was cancelled, the loop will terminate on the next iteration.
+
 		default:
 			log.Println("Connection to server lost. Attempting to reconnect in 5 seconds...")
 			time.Sleep(5 * time.Second)
@@ -135,31 +140,31 @@ func Run(args []string) {
 	}
 }
 
-// authenticate sends the TOTP token to the server and waits for a successful response.
-func authenticate(conn *websocket.Conn, token, totpSecret string) error {
+// authenticate sends the TOTP token and ClientID to the server and waits for a successful response.
+func authenticate(conn *websocket.Conn, token, totpSecret, clientID string, state *ClientState) (string, error) {
 	// If a TOTP secret is provided, generate the token from it.
 	if totpSecret != "" {
 		generatedToken, err := common.GenerateTOTP(totpSecret)
 		if err != nil {
-			return fmt.Errorf("failed to generate TOTP token from secret: %w", err)
+			return "", fmt.Errorf("failed to generate TOTP token from secret: %w", err)
 		}
 		token = generatedToken
 	}
 
 	// Send authentication request.
-	req := common.Message{Type: "auth_request", Payload: common.AuthRequest{Token: token}}
+	req := common.Message{Type: "auth_request", Payload: common.AuthRequest{Token: token, ClientID: clientID}}
 	if err := conn.WriteJSON(req); err != nil {
-		return fmt.Errorf("failed to send auth request: %w", err)
+		return "", fmt.Errorf("failed to send auth request: %w", err)
 	}
 
 	// Wait for authentication response.
 	var resp common.Message
 	if err := conn.ReadJSON(&resp); err != nil {
-		return fmt.Errorf("failed to read auth response: %w", err)
+		return "", fmt.Errorf("failed to read auth response: %w", err)
 	}
 
 	if resp.Type != "auth_response" {
-		return fmt.Errorf("unexpected message type: %s", resp.Type)
+		return "", fmt.Errorf("unexpected message type: %s", resp.Type)
 	}
 
 	// Unmarshal the payload into an AuthResponse struct.
@@ -168,15 +173,22 @@ func authenticate(conn *websocket.Conn, token, totpSecret string) error {
 	json.Unmarshal(payloadBytes, &authResp)
 
 	if !authResp.Success {
-		return fmt.Errorf("server rejected authentication: %s", authResp.Message)
+		return "", fmt.Errorf("server rejected authentication: %s", authResp.Message)
 	}
 
-	return nil
+	// Update client's forwards with data from server
+	state.mu.Lock()
+	for k, v := range authResp.Forwards {
+		state.Forwards[k] = v
+	}
+	state.mu.Unlock()
+
+	return authResp.ClientID, nil
 }
 
 // requestProxy sends a request to the server to open a public port.
-func requestProxy(conn *websocket.Conn, remotePort int, localAddr string) error {
-	req := common.Message{Type: "proxy_request", Payload: common.ProxyRequest{RemotePort: remotePort, LocalAddr: localAddr}}
+func requestProxy(conn *websocket.Conn, remotePort int, localAddr string, clientID string) error {
+	req := common.Message{Type: "proxy_request", Payload: common.ProxyRequest{RemotePort: remotePort, LocalAddr: localAddr, ClientID: clientID}}
 	if err := conn.WriteJSON(req); err != nil {
 		return fmt.Errorf("failed to send proxy request: %w", err)
 	}
@@ -288,7 +300,7 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 				json.Unmarshal(payloadBytes, &newConnPayload)
 
 				log.Printf("Received new connection for remote port %d -> tunnel %s", newConnPayload.RemotePort, newConnPayload.TunnelID)
-				go handleNewTunnel(controlConn, serverAddr, state, newConnPayload.TunnelID, newConnPayload.ClientID, newConnPayload.RemotePort)
+				go handleNewTunnel(controlConn, serverAddr, state, newConnPayload.TunnelID, state.ClientID, newConnPayload.RemotePort)
 
 			case "add_proxy":
 				var addProxyPayload common.AddProxy
@@ -299,6 +311,11 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 				state.Forwards[addProxyPayload.RemotePort] = addProxyPayload.LocalAddr
 				state.mu.Unlock()
 				log.Printf("Dynamically added new forward: remote port %d -> local %s", addProxyPayload.RemotePort, addProxyPayload.LocalAddr)
+
+				// Send a proxy request for the newly added forward
+				if err := requestProxy(controlConn, addProxyPayload.RemotePort, addProxyPayload.LocalAddr, state.ClientID); err != nil {
+					log.Printf("Failed to send proxy request for dynamically added forward: %v", err)
+				}
 
 			default:
 				log.Printf("Received unknown message type: %s", msg.Type)

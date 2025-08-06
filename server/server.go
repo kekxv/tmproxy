@@ -29,6 +29,13 @@ type Server struct {
 	mu                   sync.Mutex
 	activeTCPConnections map[string]*TCPConnectionInfo
 	adminSessions        map[string]bool
+	disconnectedClients  map[string]*DisconnectedClientInfo // Map of client ID to DisconnectedClientInfo
+}
+
+// DisconnectedClientInfo stores information about a disconnected client for re-connection purposes.
+type DisconnectedClientInfo struct {
+	ClientInfo     *ClientInfo
+	DisconnectedAt time.Time
 }
 
 // ClientInfo stores information about a connected client.
@@ -39,6 +46,7 @@ type ClientInfo struct {
 	Conn        *websocket.Conn      `json:"-"`
 	Listeners   map[int]net.Listener `json:"-"`        // Map of remote port to listener
 	Forwards    map[int]string       `json:"forwards"` // Map of remote port to local address
+	sendChan    chan common.Message  // Channel for sending messages to this client
 }
 
 // TCPConnectionInfo stores information about an active TCP connection.
@@ -61,6 +69,7 @@ func NewServer(config *common.Config) *Server {
 		activeTunnels:        make(map[string]chan net.Conn),
 		activeTCPConnections: make(map[string]*TCPConnectionInfo),
 		adminSessions:        make(map[string]bool),
+		disconnectedClients:  make(map[string]*DisconnectedClientInfo),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -101,6 +110,21 @@ func Run(args []string) {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}
+
+	// Start a goroutine to clean up disconnected clients
+	go func(s *Server) {
+		for {
+			time.Sleep(10 * time.Second) // Check every 10 seconds
+			s.mu.Lock()
+			for clientID, info := range s.disconnectedClients {
+				if time.Since(info.DisconnectedAt) > 30*time.Second {
+					log.Printf("Cleaning up expired disconnected client: %s", clientID)
+					delete(s.disconnectedClients, clientID)
+				}
+			}
+			s.mu.Unlock()
+		}
+	}(server)
 
 	select {}
 }
@@ -213,65 +237,130 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleControlChannel(conn *websocket.Conn) {
 	defer conn.Close()
 
-	clientID := uuid.New().String()
+	var clientInfo *ClientInfo
 
-	if !s.authenticateClient(conn) {
+	// Authenticate the client and get the AuthRequest which contains the ClientID
+	authSuccess, authReq := s.authenticateClient(conn)
+	if !authSuccess {
+		// Authentication failed, send error response and close connection
+
 		return
 	}
 
+	// Acquire lock for client management
 	s.mu.Lock()
+
+	// Check if a client ID was provided and if it's a re-connection
+	if authReq.ClientID != "" {
+		if disconnectedInfo, ok := s.disconnectedClients[authReq.ClientID]; ok {
+			if time.Since(disconnectedInfo.DisconnectedAt) <= 30*time.Second {
+				// Re-connecting client within the 30-second window
+				clientInfo = disconnectedInfo.ClientInfo
+				clientInfo.Conn = conn // Update with new connection
+				clientInfo.RemoteAddr = conn.RemoteAddr().String()
+				clientInfo.ConnectedAt = time.Now()
+				clientInfo.sendChan = make(chan common.Message, 100) // Re-initialize send channel
+				delete(s.disconnectedClients, authReq.ClientID)
+				log.Printf("Client reconnected: %s (ID: %s)", conn.RemoteAddr(), authReq.ClientID)
+
+				// Reactivate existing forwards for the reconnected client
+				for remotePort, localAddr := range clientInfo.Forwards {
+					log.Printf("Reactivating forward for client %s: remote %d -> local %s", clientInfo.ID, remotePort, localAddr)
+					go s.startProxyListener(clientInfo, remotePort)
+				}
+			} else {
+				// Client ID expired, remove it
+				delete(s.disconnectedClients, authReq.ClientID)
+				log.Printf("Client ID expired: %s. Assigning new ID.", authReq.ClientID)
+			}
+		}
+	}
+
+	if clientInfo == nil {
+		// New client or expired client ID, generate a new one
+		clientInfo = &ClientInfo{
+			ID:          uuid.New().String(),
+			RemoteAddr:  conn.RemoteAddr().String(),
+			ConnectedAt: time.Now(),
+			Conn:        conn,
+			Listeners:   make(map[int]net.Listener),
+			Forwards:    make(map[int]string),
+			sendChan:    make(chan common.Message, 100), // Buffered channel for sending messages
+		}
+		log.Printf("New client connected: %s (ID: %s)", conn.RemoteAddr(), clientInfo.ID)
+	}
+
 	if len(s.clients) >= s.config.MAX_CLIENTS {
 		log.Println("Max clients reached. Rejecting new connection.")
 		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Server is full"}})
-		s.mu.Unlock()
+		s.mu.Unlock() // Explicit unlock before returning
 		return
 	}
 
-	clientInfo := &ClientInfo{
-		ID:          clientID,
-		RemoteAddr:  conn.RemoteAddr().String(),
-		ConnectedAt: time.Now(),
-		Conn:        conn,
-		Listeners:   make(map[int]net.Listener),
-		Forwards:    make(map[int]string),
-	}
-	s.clients[clientID] = clientInfo
-	s.connToClientID[conn] = clientID
-	s.mu.Unlock()
+	s.clients[clientInfo.ID] = clientInfo
+	s.connToClientID[conn] = clientInfo.ID
 
-	log.Printf("Client authenticated: %s (ID: %s)", conn.RemoteAddr(), clientID)
+	// Send AuthResponse with the assigned ClientID
+	clientInfo.sendChan <- common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: true, ClientID: clientInfo.ID, Forwards: clientInfo.Forwards}}
+
+	s.mu.Unlock() // Release lock after client management
+
+	log.Printf("handleControlChannel: Client %s connected from %s", clientInfo.ID, conn.RemoteAddr())
+
+	// Start a goroutine to handle sending messages to the client
+	go func() {
+		for msg := range clientInfo.sendChan {
+			if err := clientInfo.Conn.WriteJSON(msg); err != nil {
+				log.Printf("Error writing JSON to client %s: %v", clientInfo.ID, err)
+				return
+			}
+		}
+	}()
 
 	defer func() {
 		s.mu.Lock()
-		delete(s.clients, clientID)
-		delete(s.connToClientID, conn)
+		// Close all listeners associated with this client immediately
 		for _, listener := range clientInfo.Listeners {
 			listener.Close()
 		}
+		// Close the send channel to stop the write goroutine
+		close(clientInfo.sendChan)
+
+		// Move client to disconnectedClients map with timestamp
+		s.disconnectedClients[clientInfo.ID] = &DisconnectedClientInfo{
+			ClientInfo:     clientInfo,
+			DisconnectedAt: time.Now(),
+		}
+		delete(s.clients, clientInfo.ID)
+		delete(s.connToClientID, conn)
 		s.mu.Unlock()
-		log.Printf("Client disconnected: %s (ID: %s)", conn.RemoteAddr(), clientID)
+		log.Printf("handleControlChannel: Client %s disconnected from %s", clientInfo.ID, conn.RemoteAddr())
 	}()
 
 	for {
 		var msg common.Message
+		log.Printf("handleControlChannel: Client %s waiting for message...", clientInfo.ID)
 		if err := conn.ReadJSON(&msg); err != nil {
+			log.Printf("handleControlChannel: Error reading JSON from client %s: %v", clientInfo.ID, err)
 			break
 		}
+		log.Printf("handleControlChannel: Client %s received message type: %s", clientInfo.ID, msg.Type)
 
 		switch msg.Type {
 		case "proxy_request":
 			var req common.ProxyRequest
 			payloadBytes, _ := json.Marshal(msg.Payload)
 			json.Unmarshal(payloadBytes, &req)
-			s.mu.Lock()
+			log.Printf("handleControlChannel: Client %s requested proxy for remote port %d to local %s", clientInfo.ID, req.RemotePort, req.LocalAddr)
+			s.mu.Lock() // Acquire lock for modifying clientInfo.Forwards
 			clientInfo.Forwards[req.RemotePort] = req.LocalAddr
-			s.mu.Unlock()
+			s.mu.Unlock() // Release lock
 			go s.startProxyListener(clientInfo, req.RemotePort)
 		case "local_connect_failed":
 			var failedConn common.LocalConnectFailed
 			payloadBytes, _ := json.Marshal(msg.Payload)
 			json.Unmarshal(payloadBytes, &failedConn)
-			log.Printf("Client reported local connection failed for tunnel: %s. Cleaning up.", failedConn.TunnelID)
+			log.Printf("handleControlChannel: Client %s reported local connection failed for tunnel: %s. Cleaning up.", clientInfo.ID, failedConn.TunnelID)
 
 			if tunnelChan, ok := s.activeTunnels[failedConn.TunnelID]; ok {
 				select {
@@ -280,27 +369,26 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 				default:
 				}
 			}
-			s.mu.Lock()
+			s.mu.Lock() // Acquire lock for modifying activeTunnels and activeTCPConnections
 			delete(s.activeTunnels, failedConn.TunnelID)
 			delete(s.activeTCPConnections, failedConn.TunnelID)
-			s.mu.Unlock()
+			s.mu.Unlock() // Release lock
 		}
 	}
 }
 
-func (s *Server) authenticateClient(conn *websocket.Conn) bool {
+func (s *Server) authenticateClient(conn *websocket.Conn) (bool, common.AuthRequest) {
 	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
 	defer conn.SetReadDeadline(time.Time{})
 
 	var msg common.Message
 	if err := conn.ReadJSON(&msg); err != nil {
 		log.Printf("Authentication failed for %s: %v", conn.RemoteAddr(), err)
-		return false
+		return false, common.AuthRequest{}
 	}
 
 	if msg.Type != "auth_request" {
-		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Unexpected message type"}})
-		return false
+		return false, common.AuthRequest{}
 	}
 
 	var authReq common.AuthRequest
@@ -310,21 +398,28 @@ func (s *Server) authenticateClient(conn *websocket.Conn) bool {
 	valid := totp.Validate(authReq.Token, s.config.TOTP_SECRET_KEY)
 	if !valid {
 		log.Printf("Invalid TOTP token from %s", conn.RemoteAddr())
-		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Invalid token"}})
-		return false
+		return false, authReq
 	}
 
-	conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: true}})
 	log.Printf("Authentication successful for %s", conn.RemoteAddr())
-	return true
+	return true, authReq
 }
 
 func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
+	s.mu.Lock()
+	// Check if a listener for this remotePort already exists for this client
+	if _, ok := client.Listeners[remotePort]; ok {
+		s.mu.Unlock()
+		log.Printf("Listener for port %d already active for client %s. Skipping.", remotePort, client.ID)
+		return
+	}
+	s.mu.Unlock()
+
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", remotePort)
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		log.Printf("Failed to start listener on %s for client %s: %v", listenAddr, client.ID, err)
-		client.Conn.WriteJSON(common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: false, Message: err.Error()}})
+		client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: false, Message: err.Error()}}
 		return
 	}
 
@@ -342,7 +437,7 @@ func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
 
 	publicURL := fmt.Sprintf("http://<your-server-ip>:%d", remotePort)
 	log.Printf("Started public listener for client %s on %s", client.RemoteAddr, listenAddr)
-	client.Conn.WriteJSON(common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: true, PublicURL: publicURL}})
+	client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: true, PublicURL: publicURL}}
 
 	for {
 		publicConn, err := listener.Accept()
@@ -355,22 +450,22 @@ func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
 		s.activeTunnels[tunnelID] <- publicConn
 
 		msg := common.Message{Type: "new_conn", Payload: common.NewConnection{TunnelID: tunnelID, ClientID: client.ID, RemotePort: remotePort}}
-		if err := client.Conn.WriteJSON(msg); err != nil {
-			delete(s.activeTunnels, tunnelID)
-			publicConn.Close()
-		}
+		client.sendChan <- msg
 	}
 }
 
 func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string, clientID string) {
+	log.Printf("handleDataTunnel: Starting for tunnel %s, client %s", tunnelID, clientID)
 	tunnelChan, ok := s.activeTunnels[tunnelID]
 	if !ok {
+		log.Printf("handleDataTunnel: Tunnel %s not found, closing data connection.", tunnelID)
 		dataConn.Close()
 		return
 	}
 
 	select {
 	case publicConn := <-tunnelChan:
+		log.Printf("handleDataTunnel: Received public connection for tunnel %s", tunnelID)
 		s.mu.Lock()
 		delete(s.activeTunnels, tunnelID)
 		s.activeTCPConnections[tunnelID] = &TCPConnectionInfo{
@@ -384,13 +479,15 @@ func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string, cli
 		}
 		s.mu.Unlock()
 
+		log.Printf("handleDataTunnel: Starting proxy for tunnel %s", tunnelID)
 		common.Proxy(publicConn, dataConn)
 
 		s.mu.Lock()
 		delete(s.activeTCPConnections, tunnelID)
 		s.mu.Unlock()
-		log.Printf("Tunnel %s closed.", tunnelID)
+		log.Printf("handleDataTunnel: Tunnel %s closed.", tunnelID)
 	case <-time.After(10 * time.Second):
+		log.Printf("handleDataTunnel: Timeout waiting for public connection for tunnel %s", tunnelID)
 		select {
 		case publicConn := <-tunnelChan:
 			publicConn.Close()

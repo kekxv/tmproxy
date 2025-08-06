@@ -197,24 +197,26 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleApiClients(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	clients := make([]*ClientInfo, 0, len(s.clients))
 	for _, client := range s.clients {
 		clients = append(clients, client)
 	}
 
+	s.mu.Unlock()
+
 	json.NewEncoder(w).Encode(clients)
 }
 
 func (s *Server) handleApiConnections(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	connections := make([]*TCPConnectionInfo, 0, len(s.activeTCPConnections))
 	for _, conn := range s.activeTCPConnections {
 		connections = append(connections, conn)
 	}
+
+	s.mu.Unlock()
 
 	json.NewEncoder(w).Encode(connections)
 }
@@ -237,6 +239,7 @@ func (s *Server) handleAddForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
+
 	client, ok := s.clients[req.ClientID]
 	if !ok {
 		s.mu.Unlock()
@@ -346,7 +349,6 @@ func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	s.mu.Lock()
-	defer s.mu.Unlock()
 
 	switch req.Type {
 	case "client":
@@ -378,6 +380,8 @@ func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 	}
+
+	s.mu.Unlock()
 
 	w.WriteHeader(http.StatusOK)
 }
