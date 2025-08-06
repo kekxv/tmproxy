@@ -29,9 +29,9 @@ type ProxyRequest struct {
 // ProxyResponse is the payload for the server's response to a proxy request.
 // It confirms the port that was opened and provides a URL for access.
 type ProxyResponse struct {
-	Success    bool   `json:"success"`
-	Message    string `json:"message"`
-	PublicURL  string `json:"public_url"`
+	Success   bool   `json:"success"`
+	Message   string `json:"message"`
+	PublicURL string `json:"public_url"`
 }
 
 // LocalConnectFailed is a message from the client to the server
@@ -45,4 +45,11 @@ type LocalConnectFailed struct {
 // and a new data tunnel should be established.
 type NewConnection struct {
 	TunnelID string `json:"tunnel_id"`
+}
+
+// UpdateForwarding is a message from the server to the client
+// to update the client's forwarding target.
+type UpdateForwarding struct {
+	RemoteHost string `json:"remote_host"`
+	RemotePort int    `json:"remote_port"`
 }

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 
 	"github.com/pquerna/otp/totp"
 )
@@ -20,6 +21,12 @@ type Config struct {
 	TOTP_SECRET_KEY     string `json:"TOTP_SECRET_KEY"`
 	TLS_CERT_FILE       string `json:"TLS_CERT_FILE,omitempty"`
 	TLS_KEY_FILE        string `json:"TLS_KEY_FILE,omitempty"`
+
+	// Admin Panel Configuration
+	ADMIN_USERNAME        string `json:"ADMIN_USERNAME"`
+	ADMIN_PASSWORD_HASH   string `json:"ADMIN_PASSWORD_HASH"` // Store hashed password
+	ADMIN_TOTP_SECRET_KEY string `json:"ADMIN_TOTP_SECRET_KEY"`
+	ENABLE_ADMIN_TOTP     bool   `json:"ENABLE_ADMIN_TOTP"`
 }
 
 // LoadConfig reads the configuration from a JSON file.
@@ -64,6 +71,12 @@ func createDefaultConfig(path string) (*Config, error) {
 		TOTP_SECRET_KEY:     key.Secret(),
 		TLS_CERT_FILE:       "",
 		TLS_KEY_FILE:        "",
+
+		// Admin Panel Configuration
+		ADMIN_USERNAME:        "admin",
+		ADMIN_PASSWORD_HASH:   "changeme", // IMPORTANT: Change this default password in your config file!
+		ADMIN_TOTP_SECRET_KEY: "",         // Leave empty to disable TOTP for admin, or generate one
+		ENABLE_ADMIN_TOTP:     false,
 	}
 
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -81,4 +94,13 @@ func createDefaultConfig(path string) (*Config, error) {
 	fmt.Printf("Your TOTP Secret Key is: %s\n", key.Secret())
 
 	return config, nil
+}
+
+// GenerateTOTP generates a TOTP token from a given secret.
+func GenerateTOTP(secret string) (string, error) {
+	token, err := totp.GenerateCode(secret, time.Now())
+	if err != nil {
+		return "", fmt.Errorf("failed to generate TOTP code: %w", err)
+	}
+	return token, nil
 }

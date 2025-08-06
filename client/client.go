@@ -10,10 +10,18 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/gemini-cli/tmproxy/common"
 	"github.com/gorilla/websocket"
 )
+
+// ClientState holds the dynamic state of the client's forwarding configuration.
+type ClientState struct {
+	mu         sync.RWMutex
+	LocalAddr  string
+	RemotePort int
+}
 
 // Run starts the client mode of the application.
 // It parses command-line arguments, connects to the server, and handles the proxying.
@@ -23,17 +31,27 @@ func Run(args []string) {
 	serverAddr := fs.String("server", "", "Server WebSocket URL (e.g., ws://localhost:8001/proxy_ws)")
 	localAddr := fs.String("local", "localhost:3000", "Local service address to expose")
 	remotePort := fs.Int("remote", 8080, "Requested public port on the server")
+	totpSecret := fs.String("totp-secret", "", "TOTP secret key for long-term authentication")
+	controlByServer := fs.Bool("control-by-server", false, "Let the server control local and remote addresses")
 	fs.Parse(args)
 
 	if *serverAddr == "" {
 		log.Fatal("Server URL is required. Use the --server flag.")
 	}
 
-	// Prompt for the TOTP token.
-	fmt.Print("Enter 6-digit TOTP token: ")
-	reader := bufio.NewReader(os.Stdin)
-	token, _ := reader.ReadString('\n')
-	token = strings.TrimSpace(token)
+	clientState := &ClientState{
+		LocalAddr:  *localAddr,
+		RemotePort: *remotePort,
+	}
+
+	// Prompt for the TOTP token if no secret is provided.
+	token := ""
+	if *totpSecret == "" {
+		fmt.Print("Enter 6-digit TOTP token: ")
+		reader := bufio.NewReader(os.Stdin)
+		readToken, _ := reader.ReadString('\n')
+		token = strings.TrimSpace(readToken)
+	}
 
 	// Establish the main control connection.
 	controlConn, _, err := websocket.DefaultDialer.Dial(*serverAddr, nil)
@@ -45,25 +63,38 @@ func Run(args []string) {
 	log.Println("Connected to server. Authenticating...")
 
 	// Authenticate with the server.
-	if err := authenticate(controlConn, token); err != nil {
+	if err := authenticate(controlConn, token, *totpSecret); err != nil {
 		log.Fatalf("Authentication failed: %v", err)
 	}
 
-	log.Println("Authentication successful. Sending proxy request...")
+	log.Println("Authentication successful.")
 
-	// Request the proxy to be set up.
-	if err := requestProxy(controlConn, *remotePort); err != nil {
-		log.Fatalf("Failed to request proxy: %v", err)
+	// Request the proxy to be set up if not controlled by server.
+	if !*controlByServer {
+		log.Printf("Sending proxy request for local service %s...", clientState.LocalAddr)
+		if err := requestProxy(controlConn, clientState.RemotePort); err != nil {
+			log.Fatalf("Failed to request proxy: %v", err)
+		}
+		log.Printf("Proxy requested for local service %s. Waiting for connections...", clientState.LocalAddr)
+	} else {
+		log.Println("Client is controlled by server. Waiting for server to assign forwarding targets...")
 	}
 
-	log.Printf("Proxy requested for local service %s. Waiting for connections...", *localAddr)
-
 	// Listen for new connection commands from the server.
-	listenForNewConnections(controlConn, *serverAddr, *localAddr)
+	listenForNewConnections(controlConn, *serverAddr, clientState, *controlByServer)
 }
 
 // authenticate sends the TOTP token to the server and waits for a successful response.
-func authenticate(conn *websocket.Conn, token string) error {
+func authenticate(conn *websocket.Conn, token, totpSecret string) error {
+	// If a TOTP secret is provided, generate the token from it.
+	if totpSecret != "" {
+		generatedToken, err := common.GenerateTOTP(totpSecret)
+		if err != nil {
+			return fmt.Errorf("failed to generate TOTP token from secret: %w", err)
+		}
+		token = generatedToken
+	}
+
 	// Send authentication request.
 	req := common.Message{Type: "auth_request", Payload: common.AuthRequest{Token: token}}
 	if err := conn.WriteJSON(req); err != nil {
@@ -122,7 +153,7 @@ func requestProxy(conn *websocket.Conn, remotePort int) error {
 }
 
 // listenForNewConnections waits for `new_conn` messages and spawns goroutines to handle them.
-func listenForNewConnections(controlConn *websocket.Conn, serverAddr, localAddr string) {
+func listenForNewConnections(controlConn *websocket.Conn, serverAddr string, state *ClientState, controlByServer bool) {
 	for {
 		var msg common.Message
 		if err := controlConn.ReadJSON(&msg); err != nil {
@@ -130,23 +161,46 @@ func listenForNewConnections(controlConn *websocket.Conn, serverAddr, localAddr 
 			return
 		}
 
-		if msg.Type == "new_conn" {
+		switch msg.Type {
+		case "new_conn":
 			var newConnPayload common.NewConnection
 			payloadBytes, _ := json.Marshal(msg.Payload)
 			json.Unmarshal(payloadBytes, &newConnPayload)
 
 			log.Printf("Received new connection request for tunnel: %s", newConnPayload.TunnelID)
-			go handleNewTunnel(controlConn, serverAddr, localAddr, newConnPayload.TunnelID)
+			state.mu.RLock()
+			go handleNewTunnel(controlConn, serverAddr, state, newConnPayload.TunnelID)
+			state.mu.RUnlock()
+		case "update_forwarding":
+			if controlByServer {
+				var updatePayload common.UpdateForwarding
+				payloadBytes, _ := json.Marshal(msg.Payload)
+				json.Unmarshal(payloadBytes, &updatePayload)
+
+				state.mu.Lock()
+				state.LocalAddr = fmt.Sprintf("%s:%d", updatePayload.RemoteHost, updatePayload.RemotePort)
+				state.RemotePort = updatePayload.RemotePort // This might not be strictly needed on client side, but for consistency
+				state.mu.Unlock()
+				log.Printf("Server updated forwarding target to: %s", state.LocalAddr)
+			} else {
+				log.Println("Received update_forwarding message but client is not in server-controlled mode.")
+			}
+		default:
+			log.Printf("Received unknown message type: %s", msg.Type)
 		}
 	}
 }
 
 // handleNewTunnel connects to the local service and establishes a new data WebSocket connection.
-func handleNewTunnel(controlConn *websocket.Conn, serverAddr, localAddr, tunnelID string) {
+func handleNewTunnel(controlConn *websocket.Conn, serverAddr string, state *ClientState, tunnelID string) {
+	state.mu.RLock()
+	currentLocalAddr := state.LocalAddr
+	state.mu.RUnlock()
+
 	// Connect to the local service.
-	localConn, err := net.Dial("tcp", localAddr)
+	localConn, err := net.Dial("tcp", currentLocalAddr)
 	if err != nil {
-		log.Printf("Failed to connect to local service at %s: %v", localAddr, err)
+		log.Printf("Failed to connect to local service at %s: %v", currentLocalAddr, err)
 		// Notify the server that the local connection failed.
 		msg := common.Message{Type: "local_connect_failed", Payload: common.LocalConnectFailed{TunnelID: tunnelID}}
 		if err := controlConn.WriteJSON(msg); err != nil {
@@ -156,7 +210,7 @@ func handleNewTunnel(controlConn *websocket.Conn, serverAddr, localAddr, tunnelI
 	}
 	defer localConn.Close()
 
-	log.Printf("[%s] Connected to local service. Establishing data tunnel...", tunnelID)
+	log.Printf("[%s] Connected to local service %s. Establishing data tunnel...", tunnelID, currentLocalAddr)
 
 	// Construct the data tunnel URL with the tunnel ID.
 	u, _ := url.Parse(serverAddr)

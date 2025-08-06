@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gemini-cli/tmproxy/common"
@@ -20,23 +21,47 @@ import (
 )
 
 // Server holds the state for the proxy server.
-
-// Server holds the state for the proxy server.
 // It includes the configuration, a registry of connected clients, and a map of active tunnels.
 type Server struct {
-	config       *common.Config
-	upgrader     websocket.Upgrader
-	clients      map[*websocket.Conn]bool
-	activeTunnels map[string]chan net.Conn
+	config               *common.Config
+	upgrader             websocket.Upgrader
+	clients              map[string]*websocket.Conn // Map of client ID to WebSocket connection
+	connToClientID       map[*websocket.Conn]string // Reverse map for quick lookup
+	activeTunnels        map[string]chan net.Conn
+	mu                   sync.Mutex                    // Mutex to protect concurrent access to maps
+	connectedClients     map[string]*ClientInfo        // Map of client ID to ClientInfo
+	activeTCPConnections map[string]*TCPConnectionInfo // Map of tunnel ID to TCPConnectionInfo
+	adminSessions        map[string]bool               // Stores valid admin session tokens
+}
+
+// ClientInfo stores information about a connected client.
+type ClientInfo struct {
+	ID          string    `json:"id"`
+	RemoteAddr  string    `json:"remote_addr"`
+	ConnectedAt time.Time `json:"connected_at"`
+}
+
+// TCPConnectionInfo stores information about an active TCP connection.
+type TCPConnectionInfo struct {
+	ID          string    `json:"id"`
+	TunnelID    string    `json:"tunnel_id"`
+	ClientAddr  string    `json:"client_addr"`
+	ServerAddr  string    `json:"server_addr"`
+	ConnectedAt time.Time `json:"connected_at"`
+	PublicConn  net.Conn  `json:"-"` // Store the actual connection for closing
 }
 
 // NewServer creates and initializes a new server instance.
 func NewServer(config *common.Config) *Server {
 	return &Server{
-		config:  config,
-		clients: make(map[*websocket.Conn]bool),
+		config:         config,
+		clients:        make(map[string]*websocket.Conn),
+		connToClientID: make(map[*websocket.Conn]string),
 		// A buffered channel to hold incoming connections for a tunnel before the client connects.
-		activeTunnels: make(map[string]chan net.Conn),
+		activeTunnels:        make(map[string]chan net.Conn),
+		connectedClients:     make(map[string]*ClientInfo),
+		activeTCPConnections: make(map[string]*TCPConnectionInfo),
+		adminSessions:        make(map[string]bool),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -60,6 +85,13 @@ func Run(args []string) {
 	http.HandleFunc("/client", server.handleClientDownload)
 	http.HandleFunc(config.WEBSOCKET_PATH, server.handleWebSocket)
 
+	http.HandleFunc("/admin/", server.handleAdminDashboard)
+	http.HandleFunc("/api/admin/login", server.handleAdminLogin)
+	http.HandleFunc("/api/admin/clients", server.requireAdminAuth(server.handleApiClients))
+	http.HandleFunc("/api/admin/connections", server.requireAdminAuth(server.handleApiConnections))
+	http.HandleFunc("/api/admin/disconnect", server.requireAdminAuth(server.handleApiDisconnect))
+	http.HandleFunc("/api/admin/control", server.requireAdminAuth(server.handleApiClientControl))
+
 	log.Printf("Server starting on %s...", config.LISTEN_ADDR)
 	if config.TLS_CERT_FILE != "" && config.TLS_KEY_FILE != "" {
 		log.Printf("Using TLS certificates: %s and %s", config.TLS_CERT_FILE, config.TLS_KEY_FILE)
@@ -71,10 +103,12 @@ func Run(args []string) {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}
+
+	// Keep the main goroutine alive
+	select {}
 }
 
 // handleHomePage serves a simple HTML page with instructions for the client.
-
 
 // handleHomePage serves a simple HTML page with instructions for the client.
 func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
@@ -195,28 +229,49 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleControlChannel(conn *websocket.Conn) {
 	defer conn.Close()
 
-	// Enforce connection limit.
-	if len(s.clients) >= s.config.MAX_CLIENTS {
-		log.Println("Max clients reached. Rejecting new connection.")
-		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Server is full"}})
-		return
-	}
+	clientID := uuid.New().String()
 
 	// Authenticate the client within a timeout.
+	// IMPORTANT: Do NOT hold s.mu.Lock() during network I/O (authenticateClient)
 	if !s.authenticateClient(conn) {
 		return // Authentication failed, connection closed.
 	}
 
-	s.clients[conn] = true
-	defer delete(s.clients, conn)
+	// Now that authentication is successful, acquire lock to modify shared state
+	s.mu.Lock()
+	defer s.mu.Unlock() // Ensure lock is released when function exits
 
-	log.Printf("Client authenticated: %s", conn.RemoteAddr())
+	// Enforce connection limit AFTER authentication
+	if len(s.clients) >= s.config.MAX_CLIENTS {
+		log.Println("Max clients reached. Rejecting new connection after authentication.")
+		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Server is full"}})
+		return
+	}
+
+	s.clients[clientID] = conn
+	s.connToClientID[conn] = clientID
+	s.connectedClients[clientID] = &ClientInfo{
+		ID:          clientID,
+		RemoteAddr:  conn.RemoteAddr().String(),
+		ConnectedAt: time.Now(),
+	}
+
+	log.Printf("Client authenticated: %s (ID: %s)", conn.RemoteAddr(), clientID)
+
+	defer func() {
+		s.mu.Lock()
+		delete(s.clients, clientID)
+		delete(s.connToClientID, conn)
+		delete(s.connectedClients, clientID)
+		s.mu.Unlock()
+		log.Printf("Client disconnected: %s (ID: %s)", conn.RemoteAddr(), clientID)
+	}()
 
 	// Process messages from the client on the control channel.
 	for {
 		var msg common.Message
 		if err := conn.ReadJSON(&msg); err != nil {
-			log.Printf("Client disconnected: %s", conn.RemoteAddr())
+			log.Printf("Error reading message from client %s (ID: %s): %v", conn.RemoteAddr(), clientID, err)
 			break
 		}
 
@@ -241,7 +296,10 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 					// Channel was empty, connection already handled or never put in.
 				}
 			}
+			s.mu.Lock()
 			delete(s.activeTunnels, failedConn.TunnelID)
+			delete(s.activeTCPConnections, failedConn.TunnelID)
+			s.mu.Unlock()
 			log.Printf("Tunnel %s deleted due to local connection failure.", failedConn.TunnelID)
 		}
 	}
@@ -254,13 +312,16 @@ func (s *Server) authenticateClient(conn *websocket.Conn) bool {
 	defer conn.SetReadDeadline(time.Time{}) // Clear the deadline.
 
 	var msg common.Message
+	log.Printf("Authenticating client %s: Waiting for auth_request...", conn.RemoteAddr())
 	if err := conn.ReadJSON(&msg); err != nil {
-		log.Printf("Authentication failed (timeout or error): %v", err)
+		log.Printf("Authentication failed for %s (timeout or error reading JSON): %v", conn.RemoteAddr(), err)
 		return false
 	}
 
+	log.Printf("Authenticating client %s: Received message type %s", conn.RemoteAddr(), msg.Type)
 	if msg.Type != "auth_request" {
-		log.Println("Authentication failed: unexpected message type")
+		log.Printf("Authentication failed for %s: unexpected message type %s", conn.RemoteAddr(), msg.Type)
+		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Unexpected message type"}})
 		return false
 	}
 
@@ -269,6 +330,7 @@ func (s *Server) authenticateClient(conn *websocket.Conn) bool {
 	json.Unmarshal(payloadBytes, &authReq)
 
 	valid := totp.Validate(authReq.Token, s.config.TOTP_SECRET_KEY)
+	log.Printf("Authenticating client %s: TOTP validation result: %t", conn.RemoteAddr(), valid)
 	if !valid {
 		log.Printf("Invalid TOTP token from %s", conn.RemoteAddr())
 		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Invalid token"}})
@@ -277,6 +339,7 @@ func (s *Server) authenticateClient(conn *websocket.Conn) bool {
 
 	// Send success response.
 	conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: true}})
+	log.Printf("Authentication successful for %s", conn.RemoteAddr())
 	return true
 }
 
@@ -333,9 +396,24 @@ func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string) {
 	case publicConn := <-tunnelChan:
 		log.Printf("Pairing data tunnel %s with waiting connection.", tunnelID)
 		// Clean up the tunnel from the map.
+		s.mu.Lock()
 		delete(s.activeTunnels, tunnelID)
+		s.activeTCPConnections[tunnelID] = &TCPConnectionInfo{
+			ID:          uuid.New().String(),
+			TunnelID:    tunnelID,
+			ClientAddr:  dataConn.RemoteAddr().String(),
+			ServerAddr:  publicConn.LocalAddr().String(),
+			ConnectedAt: time.Now(),
+			PublicConn:  publicConn,
+		}
+		s.mu.Unlock()
+
 		// Start proxying data.
 		common.Proxy(publicConn, dataConn)
+
+		s.mu.Lock()
+		delete(s.activeTCPConnections, tunnelID)
+		s.mu.Unlock()
 		log.Printf("Tunnel %s closed.", tunnelID)
 	case <-time.After(10 * time.Second):
 		// Timeout if the client doesn't connect the data tunnel in time.
@@ -348,7 +426,10 @@ func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string) {
 		default:
 			// Channel was empty, connection already handled or never put in.
 		}
+		s.mu.Lock()
 		delete(s.activeTunnels, tunnelID)
+		delete(s.activeTCPConnections, tunnelID)
+		s.mu.Unlock()
 	}
 }
 
@@ -402,4 +483,395 @@ func (s *Server) handleClientDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", binaryName))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, clientPath)
+}
+
+// handleAdminLogin handles administrator login requests.
+func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var creds struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		TOTP     string `json:"totp"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// IMPORTANT: In a real application, you should hash and compare passwords securely.
+	// For simplicity, we are comparing plain text here. Use bcrypt or similar.
+	if creds.Username != s.config.ADMIN_USERNAME || creds.Password != s.config.ADMIN_PASSWORD_HASH {
+		http.Error(w, "Invalid credentials", http.StatusUnauthorized)
+		return
+	}
+
+	if s.config.ENABLE_ADMIN_TOTP {
+		if !totp.Validate(creds.TOTP, s.config.ADMIN_TOTP_SECRET_KEY) {
+			http.Error(w, "Invalid TOTP token", http.StatusUnauthorized)
+			return
+		}
+	}
+
+	// Generate a session token and set it as a cookie.
+	sessionToken := uuid.New().String()
+	s.mu.Lock()
+	s.adminSessions[sessionToken] = true
+	s.mu.Unlock()
+
+	http.SetCookie(w, &http.Cookie{
+		Name:     "admin_session",
+		Value:    sessionToken,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   false, // Use true in production with HTTPS
+		SameSite: http.SameSiteLaxMode,
+	})
+
+	log.Printf("Admin login successful. Session token: %s", sessionToken)
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+// requireAdminAuth is a middleware to check for admin authentication.
+func (s *Server) requireAdminAuth(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie("admin_session")
+		if err != nil || cookie.Value == "" {
+			log.Printf("Unauthorized: No admin_session cookie or empty value. Error: %v", err)
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		s.mu.Lock()
+		if !s.adminSessions[cookie.Value] {
+			log.Printf("Unauthorized: Invalid session token: %s", cookie.Value)
+			s.mu.Unlock() // Release lock before returning
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+		s.mu.Unlock() // Release lock before calling next handler
+		log.Printf("Authorized: Session token %s is valid.", cookie.Value)
+
+		next.ServeHTTP(w, r)
+	}
+}
+
+// handleAdminDashboard serves the admin dashboard HTML page.
+func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/html")
+	fmt.Fprintf(w, `
+	<!DOCTYPE html>
+	<html lang="en">
+	<head>
+		<meta charset="UTF-8">
+		<meta name="viewport" content="width=device-width, initial-scale=1.0">
+		<title>Admin Dashboard</title>
+		<style>
+			body { font-family: sans-serif; margin: 20px; }
+			.container { max-width: 900px; margin: auto; }
+			h1 { color: #333; }
+			.login-form { background: #f9f9f9; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+			.login-form input[type="text"], .login-form input[type="password"] { width: 100%; padding: 10px; margin-bottom: 10px; border: 1px solid #ddd; border-radius: 4px; box-sizing: border-box; }
+			.login-form button { background-color: #007bff; color: white; padding: 10px 15px; border: none; border-radius: 4px; cursor: pointer; }
+			.login-form button:hover { background-color: #0056b3; }
+			.error-message { color: red; margin-bottom: 10px; }
+			.dashboard-section { margin-top: 30px; border-top: 1px solid #eee; padding-top: 20px; }
+			table { width: 100%; border-collapse: collapse; margin-top: 10px; }
+			th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+			th { background-color: #f2f2f2; }
+			.action-button { background-color: #dc3545; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; }
+			.action-button:hover { background-color: #c82333; }
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<h1>Admin Dashboard</h1>
+			<div id="login-section">
+				<div class="login-form">
+					<h2>Login</h2>
+					<div id="login-error" class="error-message"></div>
+					<input type="text" id="username" placeholder="Username">
+					<input type="password" id="password" placeholder="Password">
+					<input type="text" id="totp" placeholder="TOTP (if enabled)">
+					<button onclick="login()">Login</button>
+				</div>
+			</div>
+
+			<div id="dashboard-content" style="display:none;">
+				<div class="dashboard-section">
+					<h2>Connected Clients</h2>
+					<table id="clients-table">
+						<thead>
+							<tr>
+								<th>ID</th>
+								<th>Remote Address</th>
+								<th>Connected At</th>
+								<th>Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							<!-- Client data will be loaded here -->
+						</tbody>
+					</table>
+				</div>
+
+				<div class="dashboard-section">
+					<h2>Active TCP Connections</h2>
+					<table id="connections-table">
+						<thead>
+							<tr>
+								<th>ID</th>
+								<th>Tunnel ID</th>
+								<th>Client Address</th>
+								<th>Server Address</th>
+								<th>Connected At</th>
+								<th>Actions</th>
+							</tr>
+						</thead>
+						<tbody>
+							<!-- Connection data will be loaded here -->
+						</tbody>
+					</table>
+				</div>
+			</div>
+
+			<script>
+				async function login() {
+					const username = document.getElementById('username').value;
+					const password = document.getElementById('password').value;
+					const totp = document.getElementById('totp').value;
+					const errorDiv = document.getElementById('login-error');
+
+					errorDiv.textContent = '';
+
+					try {
+						const response = await fetch('/api/admin/login', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ username, password, totp })
+						});
+
+						if (response.ok) {
+							document.getElementById('login-section').style.display = 'none';
+							document.getElementById('dashboard-content').style.display = 'block';
+							loadDashboardData();
+						} else {
+							const errorData = await response.json();
+							errorDiv.textContent = errorData.message || 'Login failed';
+						}
+					} catch (error) {
+						errorDiv.textContent = 'An error occurred: ' + error.message;
+					}
+				}
+
+				async function loadDashboardData() {
+					// Load clients
+					const clientsResponse = await fetch('/api/admin/clients');
+					const clients = await clientsResponse.json();
+					const clientsTableBody = document.getElementById('clients-table').getElementsByTagName('tbody')[0];
+					clientsTableBody.innerHTML = '';
+					clients.forEach(client => {
+						const row = clientsTableBody.insertRow();
+						row.insertCell().textContent = client.id;
+						row.insertCell().textContent = client.remote_addr;
+						row.insertCell().textContent = new Date(client.connected_at).toLocaleString();
+						const actionsCell = row.insertCell();
+						const disconnectButton = document.createElement('button');
+						disconnectButton.textContent = 'Disconnect';
+						disconnectButton.className = 'action-button';
+						disconnectButton.onclick = () => disconnectClient(client.id);
+						actionsCell.appendChild(disconnectButton);
+					});
+
+					// Load connections
+					const connectionsResponse = await fetch('/api/admin/connections');
+					const connections = await connectionsResponse.json();
+					const connectionsTableBody = document.getElementById('connections-table').getElementsByTagName('tbody')[0];
+					connectionsTableBody.innerHTML = '';
+					connections.forEach(conn => {
+						const row = connectionsTableBody.insertRow();
+						row.insertCell().textContent = conn.id;
+						row.insertCell().textContent = conn.tunnel_id;
+						row.insertCell().textContent = conn.client_addr;
+						row.insertCell().textContent = conn.server_addr;
+						row.insertCell().textContent = new Date(conn.connected_at).toLocaleString();
+						const actionsCell = row.insertCell();
+						const disconnectButton = document.createElement('button');
+						disconnectButton.textContent = 'Disconnect';
+						disconnectButton.className = 'action-button';
+						disconnectButton.onclick = () => disconnectConnection(conn.id);
+						actionsCell.appendChild(disconnectButton);
+					});
+				}
+
+				async function disconnectClient(clientID) {
+					if (confirm('Are you sure you want to disconnect client ' + clientID + '?')) {
+						await fetch('/api/admin/disconnect', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ id: clientID, type: 'client' })
+						});
+						loadDashboardData(); // Refresh data
+					}
+				}
+
+				async function disconnectConnection(connectionID) {
+					if (confirm('Are you sure you want to disconnect connection ' + connectionID + '?')) {
+						await fetch('/api/admin/disconnect', {
+							method: 'POST',
+							headers: { 'Content-Type': 'application/json' },
+							body: JSON.stringify({ id: connectionID, type: 'connection' })
+						});
+						loadDashboardData(); // Refresh data
+					}
+				}
+
+				// Initial load (if already authenticated, e.g., via session/token)
+				// For now, we'll just show the login form initially.
+				// loadDashboardData();
+			</script>
+	</body>
+	</html>
+	`)
+}
+
+// handleApiClients returns a list of connected clients.
+func (s *Server) handleApiClients(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	clients := make([]*ClientInfo, 0, len(s.connectedClients))
+	for _, client := range s.connectedClients {
+		clients = append(clients, client)
+	}
+
+	json.NewEncoder(w).Encode(clients)
+}
+
+// handleApiConnections returns a list of active TCP connections.
+func (s *Server) handleApiConnections(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	connections := make([]*TCPConnectionInfo, 0, len(s.activeTCPConnections))
+	for _, conn := range s.activeTCPConnections {
+		connections = append(connections, conn)
+	}
+
+	json.NewEncoder(w).Encode(connections)
+}
+
+// handleApiDisconnect handles disconnecting a client or a specific TCP connection.
+func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ID   string `json:"id"`
+		Type string `json:"type"` // "client" or "connection"
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	success := false
+	var clientConnToClose *websocket.Conn
+
+	switch req.Type {
+	case "client":
+		// Find the WebSocket connection associated with the client ID
+		if clientConn, ok := s.clients[req.ID]; ok {
+			clientConnToClose = clientConn
+			// Mark for deletion after closing
+			delete(s.connectedClients, req.ID)
+			delete(s.clients, req.ID)
+			delete(s.connToClientID, clientConnToClose) // Use clientConnToClose here
+			success = true
+		}
+	case "connection":
+		// Find the TCP connection associated with the connection ID
+		if connInfo, ok := s.activeTCPConnections[req.ID]; ok {
+			connInfo.PublicConn.Close()
+			delete(s.activeTCPConnections, req.ID)
+			success = true
+		}
+	}
+
+	s.mu.Unlock() // Release lock before potential blocking I/O
+
+	if clientConnToClose != nil {
+		clientConnToClose.Close()
+	}
+
+	if success {
+		w.WriteHeader(http.StatusOK)
+		json.NewEncoder(w).Encode(map[string]bool{"success": true})
+	} else {
+		http.Error(w, "Failed to disconnect", http.StatusNotFound)
+	}
+}
+
+// handleApiClientControl handles controlling a client's forwarding target.
+func (s *Server) handleApiClientControl(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		ClientID   string `json:"client_id"`
+		RemoteHost string `json:"remote_host"`
+		RemotePort int    `json:"remote_port"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Find the WebSocket connection associated with the client ID
+	var clientConn *websocket.Conn
+	if conn, ok := s.clients[req.ClientID]; ok {
+		clientConn = conn
+	}
+
+	s.mu.Unlock() // Release lock before potential blocking I/O
+
+	if clientConn == nil {
+		http.Error(w, "Client not found", http.StatusNotFound)
+		return
+	}
+
+	// Send a message to the client to update its forwarding target
+	msg := common.Message{
+		Type: "update_forwarding",
+		Payload: common.UpdateForwarding{
+			RemoteHost: req.RemoteHost,
+			RemotePort: req.RemotePort,
+		},
+	}
+	if err := clientConn.WriteJSON(msg); err != nil {
+		log.Printf("Failed to send update_forwarding to client %s: %v", req.ClientID, err)
+		http.Error(w, "Failed to send command to client", http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
