@@ -134,19 +134,60 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 		<meta name="viewport" content="width=device-width, initial-scale=1.0">
 		<title>tmproxy Server</title>
 		<style>
-			body { font-family: sans-serif; margin: 2em; }
+			body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; margin: 0; background-color: #f0f2f5; color: #333; line-height: 1.6; }
+			.container { max-width: 900px; margin: 2em auto; padding: 30px; background-color: #fff; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); }
+			h1 { color: #0056b3; text-align: center; margin-bottom: 1em; }
+			h2 { color: #0056b3; border-bottom: 2px solid #eee; padding-bottom: 8px; margin-top: 2em; }
+			p { margin-bottom: 1em; }
+			.code-block { background-color: #e9ecef; border: 1px solid #dee2e6; border-radius: 5px; padding: 15px; margin-bottom: 1.5em; position: relative; }
+			.code-block pre { margin: 0; overflow-x: auto; font-size: 0.9em; color: #343a40; }
+			.copy-btn { position: absolute; top: 10px; right: 10px; background-color: #007bff; color: white; border: none; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-size: 0.8em; transition: background-color 0.2s ease; }
+			.copy-btn:hover { background-color: #0056b3; }
+			.copy-feedback { position: absolute; top: 10px; right: 80px; background-color: #28a745; color: white; padding: 8px 12px; border-radius: 5px; font-size: 0.8em; opacity: 0; transition: opacity 0.3s ease; }
+			.copy-feedback.show { opacity: 1; }
 		</style>
 	</head>
 	<body>
+		<div class="container">
 		<h1>tmproxy Server</h1>
 		<p>Your proxy server is running. Use the client to connect.</p>
 		<h2>Download Client</h2>
 		<p><b>Linux & macOS:</b></p>
-		<pre>curl -o tmproxy "%s/client?os=$(uname -s)&arch=$(uname -m)" && chmod +x ./tmproxy</pre>
+		<div class="code-block">
+			<pre id="linux-mac-cmd">curl -o tmproxy "%s/client?os=$(uname -s)&arch=$(uname -m)" && chmod +x ./tmproxy</pre>
+			<button class="copy-btn" onclick="copyToClipboard('linux-mac-cmd', this)">Copy</button>
+			<span class="copy-feedback">Copied!</span>
+		</div>
 		<p><b>Windows (PowerShell):</b></p>
-		<pre>Invoke-WebRequest -Uri "%s/client?os=windows&arch=amd64" -OutFile tmproxy.exe</pre>
+		<div class="code-block">
+			<pre id="windows-cmd">Invoke-WebRequest -Uri "%s/client?os=windows&arch=amd64" -OutFile tmproxy.exe</pre>
+			<button class="copy-btn" onclick="copyToClipboard('windows-cmd', this)">Copy</button>
+			<span class="copy-feedback">Copied!</span>
+		</div>
 		<p><b>Usage</b></p>
-		<pre>./tmproxy client --server %s --local localhost:%d --remote %d</pre>
+		<div class="code-block">
+			<pre id="usage-cmd">./tmproxy client --server %s --local localhost:%d --remote %d</pre>
+			<button class="copy-btn" onclick="copyToClipboard('usage-cmd', this)">Copy</button>
+			<span class="copy-feedback">Copied!</span>
+		</div>
+		</div>
+
+		<script>
+			async function copyToClipboard(elementId, button) {
+				const text = document.getElementById(elementId).textContent;
+				try {
+					await navigator.clipboard.writeText(text);
+					const feedback = button.nextElementSibling;
+					feedback.classList.add('show');
+					setTimeout(() => {
+						feedback.classList.remove('show');
+					}, 2000);
+				} catch (err) {
+					console.error('Failed to copy: ', err);
+					alert('Failed to copy command. Please copy manually.');
+				}
+			}
+		</script>
 	</body>
 	</html>
 	`, serverHTTPURL, serverHTTPURL, serverWsURL, s.config.DEFAULT_LOCAL_PORT, s.config.DEFAULT_REMOTE_PORT)
