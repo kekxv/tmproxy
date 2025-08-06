@@ -312,11 +312,6 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 				state.mu.Unlock()
 				log.Printf("Dynamically added new forward: remote port %d -> local %s", addProxyPayload.RemotePort, addProxyPayload.LocalAddr)
 
-				// Send a proxy request for the newly added forward
-				if err := requestProxy(controlConn, addProxyPayload.RemotePort, addProxyPayload.LocalAddr, state.ClientID); err != nil {
-					log.Printf("Failed to send proxy request for dynamically added forward: %v", err)
-				}
-
 			default:
 				log.Printf("Received unknown message type: %s", msg.Type)
 			}

@@ -352,7 +352,17 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			payloadBytes, _ := json.Marshal(msg.Payload)
 			json.Unmarshal(payloadBytes, &req)
 			log.Printf("handleControlChannel: Client %s requested proxy for remote port %d to local %s", clientInfo.ID, req.RemotePort, req.LocalAddr)
-			s.mu.Lock() // Acquire lock for modifying clientInfo.Forwards
+
+			s.mu.Lock() // Acquire lock for modifying clientInfo.Forwards and Listeners
+			// Check if the forward already exists and if the local address has changed
+			if existingLocalAddr, ok := clientInfo.Forwards[req.RemotePort]; ok && existingLocalAddr != req.LocalAddr {
+				log.Printf("handleControlChannel: Local address for remote port %d changed from %s to %s. Restarting listener.", req.RemotePort, existingLocalAddr, req.LocalAddr)
+				if listener, listenerOk := clientInfo.Listeners[req.RemotePort]; listenerOk {
+					listener.Close() // Close the old listener
+					delete(clientInfo.Listeners, req.RemotePort)
+					log.Printf("handleControlChannel: Closed existing listener for remote port %d.", req.RemotePort)
+				}
+			}
 			clientInfo.Forwards[req.RemotePort] = req.LocalAddr
 			s.mu.Unlock() // Release lock
 			go s.startProxyListener(clientInfo, req.RemotePort)
@@ -407,11 +417,12 @@ func (s *Server) authenticateClient(conn *websocket.Conn) (bool, common.AuthRequ
 
 func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
 	s.mu.Lock()
-	// Check if a listener for this remotePort already exists for this client
-	if _, ok := client.Listeners[remotePort]; ok {
-		s.mu.Unlock()
-		log.Printf("Listener for port %d already active for client %s. Skipping.", remotePort, client.ID)
-		return
+	// If a listener for this remotePort already exists, close it and remove it.
+	// This ensures that a new listener is always created if startProxyListener is called.
+	if listener, ok := client.Listeners[remotePort]; ok {
+		listener.Close()
+		delete(client.Listeners, remotePort)
+		log.Printf("Closed existing (possibly stale) listener for port %d for client %s.", remotePort, client.ID)
 	}
 	s.mu.Unlock()
 
@@ -442,7 +453,13 @@ func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
 	for {
 		publicConn, err := listener.Accept()
 		if err != nil {
-			return
+			// If the listener was closed, return from the goroutine
+			if opErr, ok := err.(*net.OpError); ok && opErr.Err.Error() == "use of closed network connection" {
+				log.Printf("Listener for port %d closed, stopping accept loop.", remotePort)
+				return
+			}
+			log.Printf("Error accepting connection on port %d for client %s: %v", remotePort, client.ID, err)
+			continue // Continue to accept new connections despite the error
 		}
 
 		tunnelID := uuid.New().String()
