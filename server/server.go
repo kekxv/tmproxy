@@ -46,6 +46,7 @@ type ClientInfo struct {
 type TCPConnectionInfo struct {
 	ID          string    `json:"id"`
 	TunnelID    string    `json:"tunnel_id"`
+	ClientID    string    `json:"client_id"` // New: Link to the client that initiated this tunnel
 	ClientAddr  string    `json:"client_addr"`
 	ServerAddr  string    `json:"server_addr"`
 	ConnectedAt time.Time `json:"connected_at"`
@@ -366,6 +367,7 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 // It distinguishes between control channels and data tunnels based on the presence of a tunnel_id.
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	tunnelID := r.URL.Query().Get("tunnel_id")
+	clientID := r.URL.Query().Get("client_id") // Extract clientID from query parameter
 
 	conn, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
@@ -373,9 +375,13 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if tunnelID != "" {
+	if tunnelID != "" && clientID != "" {
 		// This is a data tunnel connection.
-		s.handleDataTunnel(conn, tunnelID)
+		s.handleDataTunnel(conn, tunnelID, clientID)
+	} else if tunnelID != "" && clientID == "" {
+		log.Printf("Data tunnel connection missing client_id: %s", tunnelID)
+		conn.Close()
+		return
 	} else {
 		// This is a new control channel connection.
 		s.handleControlChannel(conn)
@@ -421,6 +427,27 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 		delete(s.clients, clientID)
 		delete(s.connToClientID, conn)
 		delete(s.connectedClients, clientID)
+
+		log.Printf("DEBUG: Client %s disconnected. Starting cleanup of active TCP connections.", clientID)
+		// Create a temporary slice to hold tunnelIDs to delete to avoid modifying map during iteration
+		tunnelsToClose := []string{}
+		for tunnelID, connInfo := range s.activeTCPConnections {
+			log.Printf("DEBUG: Checking active TCP connection %s (ClientID: %s) for client %s", tunnelID, connInfo.ClientID, clientID)
+			if connInfo.ClientID == clientID {
+				log.Printf("DEBUG: Found TCP connection %s belonging to disconnected client %s. Marking for closure.", tunnelID, clientID)
+				tunnelsToClose = append(tunnelsToClose, tunnelID)
+			}
+		}
+
+		for _, tunnelID := range tunnelsToClose {
+			connInfo := s.activeTCPConnections[tunnelID]
+			log.Printf("Closing and removing TCP connection %s for disconnected client %s", tunnelID, clientID)
+			connInfo.PublicConn.Close() // Close the underlying public TCP connection
+			delete(s.activeTCPConnections, tunnelID)
+			// Also remove from activeTunnels if it's still there (e.g., if client disconnected before data tunnel was fully established)
+			delete(s.activeTunnels, tunnelID)
+		}
+
 		// Close the associated listener if it exists
 		if listener, ok := s.clientListeners[clientID]; ok {
 			listener.Close()
@@ -435,7 +462,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 	for {
 		var msg common.Message
 		if err := conn.ReadJSON(&msg); err != nil {
-			log.Printf("Error reading message from client %s (ID: %s): %v", conn.RemoteAddr(), clientID, err)
+			log.Printf("DEBUG: Error reading message from client %s (ID: %s): %v. Initiating control channel shutdown.", conn.RemoteAddr(), clientID, err)
 			break
 		}
 
@@ -546,6 +573,7 @@ func (s *Server) startProxyListener(controlConn *websocket.Conn, remotePort int)
 			log.Printf("Failed to accept public connection: %v", err)
 			return
 		}
+		log.Printf("DEBUG: Accepted new public connection from user: %s", publicConn.RemoteAddr())
 
 		tunnelID := uuid.New().String()
 		s.activeTunnels[tunnelID] = make(chan net.Conn, 1)
@@ -554,7 +582,7 @@ func (s *Server) startProxyListener(controlConn *websocket.Conn, remotePort int)
 		log.Printf("New public connection. Tunnel ID: %s. Notifying client...", tunnelID)
 
 		// Notify the client to create a new data tunnel.
-		msg := common.Message{Type: "new_conn", Payload: common.NewConnection{TunnelID: tunnelID}}
+		msg := common.Message{Type: "new_conn", Payload: common.NewConnection{TunnelID: tunnelID, ClientID: clientID}}
 		if err := controlConn.WriteJSON(msg); err != nil {
 			log.Printf("Failed to notify client: %v", err)
 			delete(s.activeTunnels, tunnelID)
@@ -564,7 +592,7 @@ func (s *Server) startProxyListener(controlConn *websocket.Conn, remotePort int)
 }
 
 // handleDataTunnel pairs a new data WebSocket with a waiting TCP connection.
-func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string) {
+func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string, clientID string) {
 	// Look up the waiting TCP connection for this tunnel.
 	tunnelChan, ok := s.activeTunnels[tunnelID]
 	if !ok {
@@ -582,6 +610,7 @@ func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string) {
 		s.activeTCPConnections[tunnelID] = &TCPConnectionInfo{
 			ID:          uuid.New().String(),
 			TunnelID:    tunnelID,
+			ClientID:    clientID, // Populate ClientID
 			ClientAddr:  dataConn.RemoteAddr().String(),
 			ServerAddr:  publicConn.LocalAddr().String(),
 			ConnectedAt: time.Now(),

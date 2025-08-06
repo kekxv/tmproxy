@@ -45,6 +45,7 @@ type LocalConnectFailed struct {
 // and a new data tunnel should be established.
 type NewConnection struct {
 	TunnelID string `json:"tunnel_id"`
+	ClientID string `json:"client_id"`
 }
 
 // UpdateForwarding is a message from the server to the client
