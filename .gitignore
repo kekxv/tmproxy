@@ -14,3 +14,4 @@
 /tmproxy*
 # Configuration file
 config.json
+.DS_Store

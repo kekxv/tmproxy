@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>tmproxy Server</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>tmproxy Server</h1>
+        <p>Your proxy server is running. Use the client to connect.</p>
+        <h2>Download Client</h2>
+        <p><b>Linux & macOS:</b></p>
+        <div class="code-block">
+            <pre id="linux-mac-cmd">curl -o tmproxy "{{.ServerHTTPURL}}/client?os=$(uname -s)&arch=$(uname -m)" && chmod +x ./tmproxy</pre>
+            <button class="copy-btn" onclick="copyToClipboard('linux-mac-cmd', this)">Copy</button>
+            <span class="copy-feedback">Copied!</span>
+        </div>
+        <p><b>Windows (PowerShell):</b></p>
+        <div class="code-block">
+            <pre id="windows-cmd">Invoke-WebRequest -Uri "{{.ServerHTTPURL}}/client?os=windows&arch=amd64" -OutFile tmproxy.exe</pre>
+            <button class="copy-btn" onclick="copyToClipboard('windows-cmd', this)">Copy</button>
+            <span class="copy-feedback">Copied!</span>
+        </div>
+        <p><b>Usage</b></p>
+        <div class="code-block">
+            <pre id="usage-cmd">./tmproxy client --server {{.ServerWsURL}} --local localhost:{{.DefaultLocalPort}} --remote {{.DefaultRemotePort}}</pre>
+            <button class="copy-btn" onclick="copyToClipboard('usage-cmd', this)">Copy</button>
+            <span class="copy-feedback">Copied!</span>
+        </div>
+    </div>
+    <script src="/static/script.js"></script>
+</body>
+</html>
