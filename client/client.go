@@ -29,7 +29,8 @@ type ClientState struct {
 }
 
 // Run starts the client mode of the application.
-// It parses command-line arguments, connects to the server, and handles the proxying.
+// It parses command-line arguments, connects to the server, handles the proxying,
+// and implements an auto-reconnect mechanism.
 func Run(args []string) {
 	// Define and parse command-line flags.
 	fs := flag.NewFlagSet("client", flag.ExitOnError)
@@ -49,7 +50,7 @@ func Run(args []string) {
 		RemotePort: *remotePort,
 	}
 
-	// Prompt for the TOTP token if no secret is provided.
+	// Prompt for the TOTP token if no secret is provided. This is done once.
 	token := ""
 	if *totpSecret == "" {
 		fmt.Print("Enter 6-digit TOTP token: ")
@@ -58,57 +59,82 @@ func Run(args []string) {
 		token = strings.TrimSpace(readToken)
 	}
 
-	// Establish the main control connection.
-	controlConn, _, err := websocket.DefaultDialer.Dial(*serverAddr, nil)
-	if err != nil {
-		log.Fatalf("Failed to connect to server: %v", err)
-	}
-	// Removed defer controlConn.Close() from here
-
-	// Set up a channel to listen for OS signals
+	// Set up a context to manage graceful shutdown.
+	ctx, cancel := context.WithCancel(context.Background())
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
 
-	log.Println("Connected to server. Authenticating...")
-
-	// Authenticate with the server.
-	if err := authenticate(controlConn, token, *totpSecret); err != nil {
-		log.Fatalf("Authentication failed: %v", err)
-	}
-
-	log.Println("Authentication successful.")
-
-	// Request the proxy to be set up if not controlled by server.
-	if !*controlByServer {
-		log.Printf("Sending proxy request for local service %s...", clientState.LocalAddr)
-		if err := requestProxy(controlConn, clientState.RemotePort); err != nil {
-			log.Fatalf("Failed to request proxy: %v", err)
-		}
-		log.Printf("Proxy requested for local service %s. Waiting for connections...", clientState.LocalAddr)
-	} else {
-		log.Println("Client is controlled by server. Waiting for server to assign forwarding targets...")
-	}
-
-	// Use a context to manage the lifecycle of the listenForNewConnections goroutine
-	ctx, cancel := context.WithCancel(context.Background())
-
-	var wg sync.WaitGroup
-	wg.Add(1)
+	// Goroutine to handle OS signals.
 	go func() {
-		defer wg.Done()
-		listenForNewConnections(ctx, controlConn, *serverAddr, clientState, *controlByServer)
+		sig := <-sigChan
+		log.Printf("Received signal %v. Shutting down client gracefully...", sig)
+		cancel()
 	}()
 
-	// Wait for a signal to gracefully shut down
-	select {
-	case sig := <-sigChan:
-		log.Printf("Received signal %v. Shutting down client gracefully...", sig)
-		cancel() // Signal the listenForNewConnections goroutine to stop
-		// Wait for the listenForNewConnections goroutine to finish
-		wg.Wait()
-	}
+	// Main reconnection loop.
+	for {
+		// Check for shutdown signal before attempting to connect.
+		select {
+		case <-ctx.Done():
+			log.Println("Client shutdown complete.")
+			return
+		default:
+		}
 
-	log.Println("Client shutdown complete.")
+		log.Printf("Attempting to connect to server at %s...", *serverAddr)
+		controlConn, _, err := websocket.DefaultDialer.Dial(*serverAddr, nil)
+		if err != nil {
+			log.Printf("Failed to connect to server: %v. Retrying in 5 seconds...", err)
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		log.Println("Connected to server. Authenticating...")
+		if err := authenticate(controlConn, token, *totpSecret); err != nil {
+			log.Printf("Authentication failed: %v", err)
+			// If the server explicitly rejected the authentication (e.g., bad token), exit.
+			if strings.Contains(err.Error(), "server rejected authentication") {
+				log.Println("Exiting due to authentication rejection.")
+				controlConn.Close()
+				return
+			}
+			// For other auth errors (e.g., network issues), retry.
+			log.Println("Retrying in 5 seconds...")
+			controlConn.Close()
+			time.Sleep(5 * time.Second)
+			continue
+		}
+
+		log.Println("Authentication successful.")
+
+		if !*controlByServer {
+			log.Printf("Sending proxy request for local service %s...", clientState.LocalAddr)
+			if err := requestProxy(controlConn, clientState.RemotePort); err != nil {
+				log.Printf("Failed to request proxy: %v. Retrying in 5 seconds...", err)
+				controlConn.Close()
+				time.Sleep(5 * time.Second)
+				continue
+			}
+			log.Printf("Proxy requested for local service %s. Waiting for connections...", clientState.LocalAddr)
+		} else {
+			log.Println("Client is controlled by server. Waiting for server to assign forwarding targets...")
+		}
+
+		// This function blocks until the connection is lost or the context is cancelled.
+		listenForNewConnections(ctx, controlConn, *serverAddr, clientState, *controlByServer)
+
+		// After listenForNewConnections returns, the connection is considered lost.
+		controlConn.Close()
+
+		// Check if the shutdown was initiated by a signal. If not, it was a connection loss.
+		select {
+		case <-ctx.Done():
+			// Context was cancelled, the loop will terminate on the next iteration.
+		default:
+			log.Println("Connection to server lost. Attempting to reconnect in 5 seconds...")
+			time.Sleep(5 * time.Second)
+		}
+	}
 }
 
 // authenticate sends the TOTP token to the server and waits for a successful response.
