@@ -718,7 +718,7 @@ func (s *Server) requireAdminAuth(next http.HandlerFunc) http.HandlerFunc {
 			return
 		}
 		s.mu.Unlock() // Release lock before calling next handler
-		log.Printf("Authorized: Session token %s is valid.", cookie.Value)
+		//log.Printf("Authorized: Session token %s is valid.", cookie.Value)
 
 		next.ServeHTTP(w, r)
 	}
@@ -1017,6 +1017,8 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 							document.getElementById('login-section').style.display = 'none';
 							document.getElementById('dashboard-content').style.display = 'block';
 							loadDashboardData();
+							// Start refreshing data every 5 seconds after successful login
+							window.dashboardRefreshInterval = setInterval(loadDashboardData, 5000);
 						} else {
 							const errorData = await response.json();
 							errorDiv.textContent = errorData.message || 'Login failed';
@@ -1098,6 +1100,8 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 							document.getElementById('login-section').style.display = 'none';
 							document.getElementById('dashboard-content').style.display = 'block';
 							loadDashboardData();
+							// Start refreshing data every 5 seconds after successful login
+							window.dashboardRefreshInterval = setInterval(loadDashboardData, 5000);
 						} else {
 							document.getElementById('login-section').style.display = 'block';
 							document.getElementById('dashboard-content').style.display = 'none';
