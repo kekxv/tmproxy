@@ -21,6 +21,12 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+const (
+	reconnectDelay = 5 * time.Second
+	readTimeout    = 30 * time.Second
+	pingInterval   = (readTimeout * 9) / 10 // Ping more frequently than timeout
+)
+
 // ClientState holds the dynamic state of the client's forwarding configuration.
 type ClientState struct {
 	mu       sync.RWMutex
@@ -83,8 +89,8 @@ func Run(args []string) {
 		log.Printf("Attempting to connect to server at %s...", *serverAddr)
 		controlConn, _, err := websocket.DefaultDialer.Dial(*serverAddr, nil)
 		if err != nil {
-			log.Printf("Failed to connect to server: %v. Retrying in 5 seconds...", err)
-			time.Sleep(5 * time.Second)
+			log.Printf("Failed to connect to server: %v. Retrying in %v...", err, reconnectDelay)
+			time.Sleep(reconnectDelay)
 			continue
 		}
 
@@ -102,7 +108,7 @@ func Run(args []string) {
 			// For other auth errors (e.g., network issues), retry.
 			log.Println("Retrying in 5 seconds...")
 			controlConn.Close()
-			time.Sleep(5 * time.Second)
+			time.Sleep(reconnectDelay)
 			continue
 		}
 		clientState.ClientID = newClientID
@@ -116,9 +122,9 @@ func Run(args []string) {
 
 		log.Printf("Sending initial proxy request for remote port %d -> local %s...", *remotePort, *localAddr)
 		if err := requestProxy(controlConn, *remotePort, *localAddr, clientState.ClientID); err != nil {
-			log.Printf("Failed to request proxy: %v. Retrying in 5 seconds...", err)
+			log.Printf("Failed to request proxy: %v. Retrying in %v...", err, reconnectDelay)
 			controlConn.Close()
-			time.Sleep(5 * time.Second)
+			time.Sleep(reconnectDelay)
 			continue
 		}
 
@@ -134,8 +140,8 @@ func Run(args []string) {
 			// Context was cancelled, the loop will terminate on the next iteration.
 
 		default:
-			log.Println("Connection to server lost. Attempting to reconnect in 5 seconds...")
-			time.Sleep(5 * time.Second)
+			log.Printf("Connection to server lost. Attempting to reconnect in %v...", reconnectDelay)
+			time.Sleep(reconnectDelay)
 		}
 	}
 }
@@ -220,9 +226,6 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 	msgChan := make(chan common.Message)
 	errChan := make(chan error, 1)
 
-	const readTimeout = 30 * time.Second
-	const pingInterval = (readTimeout * 9) / 10 // Ping more frequently than timeout
-
 	// Set a pong handler to extend the read deadline upon receiving a pong.
 	controlConn.SetReadDeadline(time.Now().Add(readTimeout))
 	controlConn.SetPongHandler(func(string) error {
@@ -296,16 +299,20 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 			switch msg.Type {
 			case "new_conn":
 				var newConnPayload common.NewConnection
-				payloadBytes, _ := json.Marshal(msg.Payload)
-				json.Unmarshal(payloadBytes, &newConnPayload)
+				if err := unmarshalPayload(msg.Payload, &newConnPayload); err != nil {
+					log.Printf("Error unmarshalling new_conn payload: %v", err)
+					continue
+				}
 
 				log.Printf("Received new connection for remote port %d -> tunnel %s", newConnPayload.RemotePort, newConnPayload.TunnelID)
 				go handleNewTunnel(controlConn, serverAddr, state, newConnPayload.TunnelID, state.ClientID, newConnPayload.RemotePort)
 
 			case "add_proxy":
 				var addProxyPayload common.AddProxy
-				payloadBytes, _ := json.Marshal(msg.Payload)
-				json.Unmarshal(payloadBytes, &addProxyPayload)
+				if err := unmarshalPayload(msg.Payload, &addProxyPayload); err != nil {
+					log.Printf("Error unmarshalling add_proxy payload: %v", err)
+					continue
+				}
 
 				state.mu.Lock()
 				state.Forwards[addProxyPayload.RemotePort] = addProxyPayload.LocalAddr
@@ -317,6 +324,18 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 			}
 		}
 	}
+}
+
+// unmarshalPayload is a helper function to decode a message payload into a struct.
+func unmarshalPayload(payload interface{}, v interface{}) error {
+	payloadBytes, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal payload: %w", err)
+	}
+	if err := json.Unmarshal(payloadBytes, v); err != nil {
+		return fmt.Errorf("failed to unmarshal payload: %w", err)
+	}
+	return nil
 }
 
 // handleNewTunnel connects to the local service and establishes a new data WebSocket connection.

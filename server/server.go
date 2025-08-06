@@ -474,7 +474,7 @@ func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string, cli
 	log.Printf("handleDataTunnel: Starting for tunnel %s, client %s", tunnelID, clientID)
 	tunnelChan, ok := s.activeTunnels[tunnelID]
 	if !ok {
-		log.Printf("handleDataTunnel: Tunnel %s not found, closing data connection.", tunnelID)
+		log.Printf("handleDataTunnel: Tunnel %s not found for client %s, closing data connection.", tunnelID, clientID)
 		dataConn.Close()
 		return
 	}
