@@ -91,6 +91,7 @@ func Run(args []string) {
 	http.HandleFunc("/api/admin/connections", server.requireAdminAuth(server.handleApiConnections))
 	http.HandleFunc("/api/admin/disconnect", server.requireAdminAuth(server.handleApiDisconnect))
 	http.HandleFunc("/api/admin/control", server.requireAdminAuth(server.handleApiClientControl))
+	http.HandleFunc("/api/admin/userinfo", server.requireAdminAuth(server.handleApiUserInfo))
 
 	log.Printf("Server starting on %s...", config.LISTEN_ADDR)
 	if config.TLS_CERT_FILE != "" && config.TLS_KEY_FILE != "" {
@@ -239,12 +240,12 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 
 	// Now that authentication is successful, acquire lock to modify shared state
 	s.mu.Lock()
-	defer s.mu.Unlock() // Ensure lock is released when function exits
 
 	// Enforce connection limit AFTER authentication
 	if len(s.clients) >= s.config.MAX_CLIENTS {
 		log.Println("Max clients reached. Rejecting new connection after authentication.")
 		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Server is full"}})
+		s.mu.Unlock() // Release lock before returning
 		return
 	}
 
@@ -255,6 +256,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 		RemoteAddr:  conn.RemoteAddr().String(),
 		ConnectedAt: time.Now(),
 	}
+	s.mu.Unlock() // Release lock after modifying shared state
 
 	log.Printf("Client authenticated: %s (ID: %s)", conn.RemoteAddr(), clientID)
 
@@ -538,6 +540,12 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
 }
 
+// handleApiUserInfo returns basic user information if authenticated.
+func (s *Server) handleApiUserInfo(w http.ResponseWriter, r *http.Request) {
+	w.WriteHeader(http.StatusOK)
+	json.NewEncoder(w).Encode(map[string]interface{}{"success": true, "username": s.config.ADMIN_USERNAME})
+}
+
 // requireAdminAuth is a middleware to check for admin authentication.
 func (s *Server) requireAdminAuth(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
@@ -732,9 +740,29 @@ func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 
-				// Initial load (if already authenticated, e.g., via session/token)
-				// For now, we'll just show the login form initially.
-				// loadDashboardData();
+				// Initial check for authentication status
+				checkAuthStatus();
+
+				async function checkAuthStatus() {
+					try {
+						const response = await fetch('/api/admin/userinfo');
+						if (response.ok) {
+							document.getElementById('login-section').style.display = 'none';
+							document.getElementById('dashboard-content').style.display = 'block';
+							loadDashboardData();
+						} else {
+							document.getElementById('login-section').style.display = 'block';
+							document.getElementById('dashboard-content').style.display = 'none';
+						}
+					} catch (error) {
+						console.error('Error checking auth status:', error);
+						document.getElementById('login-section').style.display = 'block';
+						document.getElementById('dashboard-content').style.display = 'none';
+					}
+				}
+
+				// Call checkAuthStatus on page load
+				window.onload = checkAuthStatus;
 			</script>
 	</body>
 	</html>
@@ -784,42 +812,68 @@ func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	log.Printf("handleApiDisconnect: Received request to disconnect ID: %s, Type: %s", req.ID, req.Type)
+
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	defer s.mu.Unlock() // Ensure lock is released when function exits
 
 	success := false
 	var clientConnToClose *websocket.Conn
+	var publicConnToClose net.Conn
 
 	switch req.Type {
 	case "client":
 		// Find the WebSocket connection associated with the client ID
-		if clientConn, ok := s.clients[req.ID]; ok {
+		clientConn, ok := s.clients[req.ID]
+		if ok {
+			log.Printf("handleApiDisconnect: Found client connection for ID: %s", req.ID)
 			clientConnToClose = clientConn
-			// Mark for deletion after closing
+			// Mark for deletion while holding the lock
 			delete(s.connectedClients, req.ID)
 			delete(s.clients, req.ID)
 			delete(s.connToClientID, clientConnToClose) // Use clientConnToClose here
 			success = true
+		} else {
+			log.Printf("handleApiDisconnect: Client connection not found for ID: %s", req.ID)
 		}
 	case "connection":
 		// Find the TCP connection associated with the connection ID
 		if connInfo, ok := s.activeTCPConnections[req.ID]; ok {
-			connInfo.PublicConn.Close()
+			log.Printf("handleApiDisconnect: Found TCP connection for ID: %s", req.ID)
+			publicConnToClose = connInfo.PublicConn
 			delete(s.activeTCPConnections, req.ID)
 			success = true
+		} else {
+			log.Printf("handleApiDisconnect: TCP connection not found for ID: %s", req.ID)
 		}
 	}
 
-	s.mu.Unlock() // Release lock before potential blocking I/O
+	// The defer s.mu.Unlock() will handle the unlock when the function exits.
+	// Blocking I/O operations are performed after the lock is released.
 
 	if clientConnToClose != nil {
-		clientConnToClose.Close()
+		log.Printf("handleApiDisconnect: Attempting to close WebSocket connection for ID: %s", req.ID)
+		if err := clientConnToClose.Close(); err != nil {
+			log.Printf("handleApiDisconnect: Error closing WebSocket connection for ID %s: %v", req.ID, err)
+		}
+	} else if req.Type == "client" && !success {
+		// If it was a client disconnect request and we didn't find the connection
+		log.Printf("handleApiDisconnect: Client disconnect requested for ID %s, but connection was not found or already closed.", req.ID)
+	}
+
+	if publicConnToClose != nil {
+		log.Printf("handleApiDisconnect: Attempting to close TCP connection for ID: %s", req.ID)
+		if err := publicConnToClose.Close(); err != nil {
+			log.Printf("handleApiDisconnect: Error closing TCP connection for ID %s: %v", req.ID, err)
+		}
 	}
 
 	if success {
+		log.Printf("handleApiDisconnect: Disconnect operation successful for ID: %s", req.ID)
 		w.WriteHeader(http.StatusOK)
 		json.NewEncoder(w).Encode(map[string]bool{"success": true})
 	} else {
+		log.Printf("handleApiDisconnect: Disconnect operation failed for ID: %s", req.ID)
 		http.Error(w, "Failed to disconnect", http.StatusNotFound)
 	}
 }
