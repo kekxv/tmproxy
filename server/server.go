@@ -32,6 +32,7 @@ type Server struct {
 	connectedClients     map[string]*ClientInfo        // Map of client ID to ClientInfo
 	activeTCPConnections map[string]*TCPConnectionInfo // Map of tunnel ID to TCPConnectionInfo
 	adminSessions        map[string]bool               // Stores valid admin session tokens
+	clientListeners      map[string]net.Listener       // New: Map of client ID to their public TCP listener
 }
 
 // ClientInfo stores information about a connected client.
@@ -68,6 +69,7 @@ func NewServer(config *common.Config) *Server {
 			// Allow any origin for simplicity. In production, this should be restricted.
 			CheckOrigin: func(r *http.Request) bool { return true },
 		},
+		clientListeners: make(map[string]net.Listener),
 	}
 }
 
@@ -419,6 +421,12 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 		delete(s.clients, clientID)
 		delete(s.connToClientID, conn)
 		delete(s.connectedClients, clientID)
+		// Close the associated listener if it exists
+		if listener, ok := s.clientListeners[clientID]; ok {
+			listener.Close()
+			delete(s.clientListeners, clientID)
+			log.Printf("Closed listener for client %s", clientID)
+		}
 		s.mu.Unlock()
 		log.Printf("Client disconnected: %s (ID: %s)", conn.RemoteAddr(), clientID)
 	}()
@@ -501,14 +509,31 @@ func (s *Server) authenticateClient(conn *websocket.Conn) bool {
 
 // startProxyListener creates a new public TCP listener for a client.
 func (s *Server) startProxyListener(controlConn *websocket.Conn, remotePort int) {
+	clientID, ok := s.connToClientID[controlConn]
+	if !ok {
+		log.Printf("startProxyListener: Could not find clientID for control connection.")
+		return
+	}
+
 	listenAddr := fmt.Sprintf("0.0.0.0:%d", remotePort)
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
-		log.Printf("Failed to start listener on %s: %v", listenAddr, err)
+		log.Printf("Failed to start listener on %s for client %s: %v", listenAddr, clientID, err)
 		controlConn.WriteJSON(common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: false, Message: err.Error()}})
 		return
 	}
-	defer listener.Close()
+
+	s.mu.Lock()
+	s.clientListeners[clientID] = listener
+	s.mu.Unlock()
+
+	defer func() {
+		s.mu.Lock()
+		delete(s.clientListeners, clientID)
+		s.mu.Unlock()
+		listener.Close()
+		log.Printf("Closed listener on %s for client %s", listenAddr, clientID)
+	}()
 
 	publicURL := fmt.Sprintf("http://<your-server-ip>:%d", remotePort)
 	log.Printf("Started public listener for client %s on %s", controlConn.RemoteAddr(), listenAddr)
@@ -1190,11 +1215,19 @@ func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
 		}
 	case "connection":
 		// Find the TCP connection associated with the connection ID
-		if connInfo, ok := s.activeTCPConnections[req.ID]; ok {
-			log.Printf("handleApiDisconnect: Found TCP connection for ID: %s", req.ID)
-			publicConnToClose = connInfo.PublicConn
-			delete(s.activeTCPConnections, req.ID)
-			success = true
+		// Iterate to find the connection by its ID, as the map is keyed by TunnelID
+		var tunnelIDToDelete string
+		for tID, connInfo := range s.activeTCPConnections {
+			if connInfo.ID == req.ID {
+				log.Printf("handleApiDisconnect: Found TCP connection for ID: %s (TunnelID: %s)", req.ID, tID)
+				publicConnToClose = connInfo.PublicConn
+				tunnelIDToDelete = tID
+				success = true
+				break
+			}
+		}
+		if success {
+			delete(s.activeTCPConnections, tunnelIDToDelete)
 		} else {
 			log.Printf("handleApiDisconnect: TCP connection not found for ID: %s", req.ID)
 		}
