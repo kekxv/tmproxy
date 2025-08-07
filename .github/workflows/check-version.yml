@@ -12,7 +12,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v3
         with:
-          fetch-depth: 0 # Fetch all history for tag checking
+          fetch-depth: 0
 
       - name: Read version from file
         id: get_version
@@ -23,6 +23,20 @@ jobs:
         run: |
           TAG_EXISTS=$(git tag -l "${{ steps.get_version.outputs.VERSION }}" | wc -l)
           echo "TAG_EXISTS=$TAG_EXISTS" >> $GITHUB_OUTPUT
+
+      - name: Set up Go
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.20' # Specify a Go version
+
+      - name: Get dependencies
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: go get -v -t -d ./...
+
+      - name: Get test
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: go test -timeout 10s ./...
 
       - name: Push tag if not exists
         if: steps.check_tag.outputs.TAG_EXISTS == '0'
