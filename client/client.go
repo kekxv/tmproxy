@@ -21,6 +21,19 @@ import (
 	"github.com/gorilla/websocket"
 )
 
+// WebSocketConn interface abstracts the websocket.Conn methods we use
+type WebSocketConn interface {
+	WriteJSON(v interface{}) error
+	ReadJSON(v interface{}) error
+	Close() error
+	WriteMessage(messageType int, data []byte) error
+	ReadMessage() (messageType int, p []byte, err error)
+	SetReadDeadline(t time.Time) error
+	SetPongHandler(h func(appData string) error)
+	WriteControl(messageType int, data []byte, deadline time.Time) error
+	RemoteAddr() net.Addr
+}
+
 const (
 	reconnectDelay = 5 * time.Second
 	readTimeout    = 30 * time.Second
@@ -154,7 +167,7 @@ func Run(args []string) {
 }
 
 // authenticate sends the TOTP token and ClientID to the server and waits for a successful response.
-func authenticate(conn *websocket.Conn, token, totpSecret, clientID string, state *ClientState) (string, error) {
+func authenticate(conn WebSocketConn, token, totpSecret, clientID string, state *ClientState) (string, error) {
 	// If a TOTP secret is provided, generate the token from it.
 	if totpSecret != "" {
 		generatedToken, err := common.GenerateTOTP(totpSecret)
@@ -198,7 +211,7 @@ func authenticate(conn *websocket.Conn, token, totpSecret, clientID string, stat
 }
 
 // requestProxy sends a request to the server to open a public port.
-func requestProxy(conn *websocket.Conn, remotePort int, localAddr string, clientID string) error {
+func requestProxy(conn WebSocketConn, remotePort int, localAddr string, clientID string) error {
 	req := common.Message{Type: "proxy_request", Payload: common.ProxyRequest{RemotePort: remotePort, LocalAddr: localAddr, ClientID: clientID}}
 	if err := conn.WriteJSON(req); err != nil {
 		return fmt.Errorf("failed to send proxy request: %w", err)
@@ -227,7 +240,7 @@ func requestProxy(conn *websocket.Conn, remotePort int, localAddr string, client
 }
 
 // listenForNewConnections waits for messages from the server and handles them.
-func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, serverAddr string, state *ClientState) {
+func listenForNewConnections(ctx context.Context, controlConn WebSocketConn, serverAddr string, state *ClientState) {
 	msgChan := make(chan common.Message)
 	errChan := make(chan error, 1)
 
@@ -366,7 +379,7 @@ func unmarshalPayload(payload interface{}, v interface{}) error {
 }
 
 // handleNewTunnel connects to the local service and establishes a new data WebSocket connection.
-func handleNewTunnel(controlConn *websocket.Conn, serverAddr string, state *ClientState, tunnelID string, clientID string, remotePort int) {
+func handleNewTunnel(controlConn WebSocketConn, serverAddr string, state *ClientState, tunnelID string, clientID string, remotePort int) {
 	state.mu.RLock()
 	var localAddr string
 	var found bool
