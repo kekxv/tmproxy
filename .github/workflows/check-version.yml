@@ -1,0 +1,35 @@
+name: Check and Push Version Tag
+
+on:
+  push:
+    paths:
+      - 'version'
+
+jobs:
+  check-version:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0 # Fetch all history for tag checking
+
+      - name: Read version from file
+        id: get_version
+        run: echo "VERSION=$(cat version)" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          TAG_EXISTS=$(git tag -l "${{ steps.get_version.outputs.VERSION }}" | wc -l)
+          echo "TAG_EXISTS=$TAG_EXISTS" >> $GITHUB_OUTPUT
+
+      - name: Push tag if not exists
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git tag "${{ steps.get_version.outputs.VERSION }}"
+          git push origin "${{ steps.get_version.outputs.VERSION }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
