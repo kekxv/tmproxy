@@ -113,10 +113,9 @@ document.addEventListener('DOMContentLoaded', () => {
             row.insertCell().textContent = new Date(client.connected_at).toLocaleString();
 
             const forwardsCell = row.insertCell();
-            if (client.forwards) {
-                for (const remotePort in client.forwards) {
-                    const localAddr = client.forwards[remotePort];
-                    const forwardText = `${remotePort} -> ${localAddr}`;
+            if (client.forwards && Array.isArray(client.forwards)) {
+                client.forwards.forEach(forward => {
+                    const forwardText = `${forward.REMOTE_PORT} -> ${forward.LOCAL_ADDR}`;
                     const forwardDiv = document.createElement('div');
                     forwardDiv.textContent = forwardText;
 
@@ -124,15 +123,15 @@ document.addEventListener('DOMContentLoaded', () => {
                     deleteButton.textContent = 'Del';
                     deleteButton.className = 'delete-button';
                     deleteButton.onclick = async () => {
-                        const confirmed = await showModal('Confirm Delete', `Are you sure you want to delete forward for client ${client.id} on remote port ${remotePort}?`, 'confirm');
+                        const confirmed = await showModal('Confirm Delete', `Are you sure you want to delete forward for client ${client.id} on remote port ${forward.REMOTE_PORT}?`, 'confirm');
                         if (confirmed) {
-                            deleteForward(client.id, remotePort);
+                            deleteForward(client.id, forward.REMOTE_PORT);
                         }
                     };
                     forwardDiv.appendChild(deleteButton);
 
                     forwardsCell.appendChild(forwardDiv);
-                }
+                });
             }
 
             const actionsCell = row.insertCell();
