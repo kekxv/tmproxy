@@ -30,7 +30,7 @@ const (
 // ClientState holds the dynamic state of the client's forwarding configuration.
 type ClientState struct {
 	mu       sync.RWMutex
-	Forwards map[int]string // Map of remote port to local address
+	Forwards []common.ForwardConfig // Array of forward configurations
 	ClientID string         // Client's unique ID, assigned by server
 }
 
@@ -41,8 +41,7 @@ func Run(args []string) {
 	// Define and parse command-line flags.
 	fs := flag.NewFlagSet("client", flag.ExitOnError)
 	serverAddr := fs.String("server", "", "Server WebSocket URL (e.g., ws://localhost:8001/proxy_ws)")
-	localAddr := fs.String("local", "localhost:3000", "Local service address to expose")
-	remotePort := fs.Int("remote", 8080, "Requested public port on the server")
+	
 	totpSecret := fs.String("totp-secret", "", "TOTP secret key for long-term authentication")
 	fs.Parse(args)
 
@@ -51,7 +50,7 @@ func Run(args []string) {
 	}
 
 	clientState := &ClientState{
-		Forwards: make(map[int]string),
+		Forwards: []common.ForwardConfig{},
 		ClientID: "", // Initialize with empty ID
 	}
 
@@ -128,23 +127,7 @@ func Run(args []string) {
 		log.Println("Authentication successful.")
 
 		// Reset state on successful connection and send initial proxy request
-		clientState.mu.Lock()
-		clientState.Forwards[*remotePort] = *localAddr
-		clientState.mu.Unlock()
-
-		log.Printf("Sending initial proxy request for remote port %d -> local %s...", *remotePort, *localAddr)
-		if err := requestProxy(controlConn, *remotePort, *localAddr, clientState.ClientID); err != nil {
-			log.Printf("Failed to request proxy: %v. Retrying in %v...", err, reconnectDelay)
-			controlConn.Close()
-			timer := time.NewTimer(reconnectDelay)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-				return
-			case <-timer.C:
-			}
-			continue
-		}
+		
 
 		// This function blocks until the connection is lost or the context is cancelled.
 		listenForNewConnections(ctx, controlConn, *serverAddr, clientState)
@@ -208,9 +191,7 @@ func authenticate(conn *websocket.Conn, token, totpSecret, clientID string, stat
 
 	// Update client's forwards with data from server
 	state.mu.Lock()
-	for k, v := range authResp.Forwards {
-		state.Forwards[k] = v
-	}
+	state.Forwards = authResp.Forwards
 	state.mu.Unlock()
 
 	return authResp.ClientID, nil
@@ -339,12 +320,23 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 				}
 
 				state.mu.Lock()
-				state.Forwards[addProxyPayload.RemotePort] = addProxyPayload.LocalAddr
+				// Check if the forward already exists and if the local address has changed
+				found := false
+				for i, forward := range state.Forwards {
+					if forward.REMOTE_PORT == addProxyPayload.RemotePort {
+						state.Forwards[i].LOCAL_ADDR = addProxyPayload.LocalAddr
+						found = true
+						break
+					}
+				}
+				if !found {
+					state.Forwards = append(state.Forwards, common.ForwardConfig{REMOTE_PORT: addProxyPayload.RemotePort, LOCAL_ADDR: addProxyPayload.LocalAddr})
+				}
 				state.mu.Unlock()
 				log.Printf("Dynamically added new forward: remote port %d -> local %s", addProxyPayload.RemotePort, addProxyPayload.LocalAddr)
 
 			case "forwards_updated": // Handle updated forwards from server
-				var updatedForwards map[int]string
+				var updatedForwards []common.ForwardConfig
 				if err := unmarshalPayload(msg.Payload, &updatedForwards); err != nil {
 					log.Printf("Error unmarshalling forwards_updated payload: %v", err)
 					continue
@@ -376,10 +368,18 @@ func unmarshalPayload(payload interface{}, v interface{}) error {
 // handleNewTunnel connects to the local service and establishes a new data WebSocket connection.
 func handleNewTunnel(controlConn *websocket.Conn, serverAddr string, state *ClientState, tunnelID string, clientID string, remotePort int) {
 	state.mu.RLock()
-	localAddr, ok := state.Forwards[remotePort]
+	var localAddr string
+	var found bool
+	for _, forward := range state.Forwards {
+		if forward.REMOTE_PORT == remotePort {
+			localAddr = forward.LOCAL_ADDR
+			found = true
+			break
+		}
+	}
 	state.mu.RUnlock()
 
-	if !ok {
+	if !found {
 		log.Printf("[%s] No local address configured for remote port %d", tunnelID, remotePort)
 		return
 	}
