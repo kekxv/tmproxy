@@ -177,7 +177,41 @@ document.addEventListener('DOMContentLoaded', () => {
             row.insertCell().textContent = conn.client_addr;
             row.insertCell().textContent = conn.server_addr;
             row.insertCell().textContent = new Date(conn.connected_at).toLocaleString();
+
+            const actionsCell = row.insertCell();
+            const disconnectButton = document.createElement('button');
+            disconnectButton.textContent = 'Disconnect';
+            disconnectButton.className = 'delete-button';
+            disconnectButton.onclick = async () => {
+                const confirmed = await showModal('Confirm Disconnect', `Are you sure you want to disconnect TCP connection ${conn.id} (Tunnel ID: ${conn.tunnel_id})?`, 'confirm');
+                if (confirmed) {
+                    disconnectConnection(conn.tunnel_id);
+                }
+            };
+            actionsCell.appendChild(disconnectButton);
         });
+    }
+
+    async function disconnectConnection(tunnelId) {
+        try {
+            const response = await fetch('/api/admin/disconnect', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ connection_id: tunnelId }),
+            });
+            const result = await response.json();
+            if (result.success) {
+                await showModal('Success', 'TCP connection disconnected successfully!', 'alert');
+                fetchData(); // Refresh data
+            } else {
+                await showModal('Error', `Failed to disconnect TCP connection: ${result.message}`, 'alert');
+            }
+        } catch (error) {
+            console.error('Error disconnecting TCP connection:', error);
+            await showModal('Error', 'Error disconnecting TCP connection.', 'alert');
+        }
     }
 
     async function addForward(clientId, remotePort, localAddr) {

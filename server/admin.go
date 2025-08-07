@@ -68,8 +68,6 @@ func (s *Server) handleAdminLoginPage(w http.ResponseWriter, r *http.Request) {
 	`)
 }
 
-
-
 func (s *Server) handleApiClients(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 
@@ -212,36 +210,4 @@ func (s *Server) requireAdminAuth(next http.HandlerFunc) http.HandlerFunc {
 
 		next.ServeHTTP(w, r)
 	}
-}
-
-func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req struct {
-		ClientID string `json:"client_id"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Invalid request body"})
-		return
-	}
-
-	s.mu.Lock()
-	client, ok := s.clients[req.ClientID]
-	s.mu.Unlock()
-
-	if !ok {
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Client not found or already disconnected"})
-		return
-	}
-
-	// Closing the connection will trigger the cleanup logic in handleControlChannel
-	client.Conn.Close()
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"success": true})
 }

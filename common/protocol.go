@@ -72,3 +72,9 @@ type DelForwardResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
 }
+
+// DisconnectResponse is the response to a DisconnectRequest.
+type DisconnectResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}

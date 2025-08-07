@@ -273,7 +273,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			Listeners:   make(map[int]net.Listener),
 			Forwards:    make(map[int]string),
 			sendChan:    make(chan common.Message, 100), // Buffered channel for sending messages
-			done:        make(chan struct{}),                // Initialize done channel
+			done:        make(chan struct{}),            // Initialize done channel
 		}
 		log.Printf("New client connected: %s (ID: %s)", conn.RemoteAddr(), clientInfo.ID)
 	}
@@ -383,10 +383,12 @@ func (s *Server) authenticateClient(conn *websocket.Conn) (bool, common.AuthRequ
 	var msg common.Message
 	if err := conn.ReadJSON(&msg); err != nil {
 		log.Printf("Authentication failed for %s: %v", conn.RemoteAddr(), err)
+		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Authentication failed: Invalid message format or timeout"}})
 		return false, common.AuthRequest{}
 	}
 
 	if msg.Type != "auth_request" {
+		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Authentication failed: Expected auth_request"}})
 		return false, common.AuthRequest{}
 	}
 
@@ -397,6 +399,7 @@ func (s *Server) authenticateClient(conn *websocket.Conn) (bool, common.AuthRequ
 	valid := totp.Validate(authReq.Token, s.config.TOTP_SECRET_KEY)
 	if !valid {
 		log.Printf("Invalid TOTP token from %s", conn.RemoteAddr())
+		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Authentication failed: Invalid TOTP token"}})
 		return false, authReq
 	}
 
@@ -565,6 +568,81 @@ func (s *Server) handleClientDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", binaryName))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, clientPath)
+}
+
+// DisconnectRequest can be used to disconnect either a client or a specific TCP connection.
+type DisconnectRequest struct {
+	ClientID     string `json:"client_id,omitempty"`
+	ConnectionID string `json:"connection_id,omitempty"` // This will be the TunnelID
+}
+
+func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req DisconnectRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if req.ClientID != "" {
+		// Handle client disconnection
+		client, ok := s.clients[req.ClientID]
+		if !ok {
+			json.NewEncoder(w).Encode(common.DisconnectResponse{Success: false, Message: "Client not found"})
+			return
+		}
+
+		// Close all listeners associated with this client
+		for _, listener := range client.Listeners {
+			listener.Close()
+		}
+		// Close the send channel to stop the write goroutine
+		close(client.sendChan)
+		// Close the done channel to signal all related goroutines to stop
+		close(client.done)
+
+		// Move client to disconnectedClients map with timestamp
+		s.disconnectedClients[client.ID] = &DisconnectedClientInfo{
+			ClientInfo:     client,
+			DisconnectedAt: time.Now(),
+		}
+		delete(s.clients, client.ID)
+		// Find and delete from connToClientID map
+		for conn, id := range s.connToClientID {
+			if id == client.ID {
+				delete(s.connToClientID, conn)
+				conn.Close() // Close the websocket connection
+				break
+			}
+		}
+
+		log.Printf("Client %s disconnected by admin.", client.ID)
+		json.NewEncoder(w).Encode(common.DisconnectResponse{Success: true, Message: "Client disconnected successfully"})
+		return
+	} else if req.ConnectionID != "" {
+		// Handle TCP connection disconnection
+		connInfo, ok := s.activeTCPConnections[req.ConnectionID]
+		if !ok {
+			json.NewEncoder(w).Encode(common.DisconnectResponse{Success: false, Message: "TCP connection not found"})
+			return
+		}
+
+		connInfo.PublicConn.Close() // Close the public facing TCP connection
+		delete(s.activeTCPConnections, req.ConnectionID)
+		log.Printf("TCP connection %s (TunnelID: %s) disconnected by admin.", connInfo.ID, connInfo.TunnelID)
+		json.NewEncoder(w).Encode(common.DisconnectResponse{Success: true, Message: "TCP connection disconnected successfully"})
+		return
+	} else {
+		http.Error(w, "Invalid request: either client_id or connection_id must be provided", http.StatusBadRequest)
+		return
+	}
 }
 
 func (s *Server) handleApiDeleteForward(w http.ResponseWriter, r *http.Request) {

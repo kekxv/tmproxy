@@ -85,7 +85,7 @@ func TestWebSocketAuthentication(t *testing.T) {
 	assert.Equal(t, "auth_response", failedResponse.Type)
 	failedPayloadMap := failedResponse.Payload.(map[string]interface{})
 	assert.False(t, failedPayloadMap["success"].(bool))
-	assert.Equal(t, "Invalid token", failedPayloadMap["message"].(string))
+	assert.Equal(t, "Authentication failed: Invalid TOTP token", failedPayloadMap["message"].(string))
 }
 
 // TestProxyRequestFlow simulates a client connecting, authenticating, and requesting a proxy.
