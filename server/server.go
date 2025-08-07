@@ -218,8 +218,10 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 	s.mu.Lock()
 
 	// Check if a client ID was provided and if it's a re-connection
+	var disconnectedInfo *DisconnectedClientInfo
 	if authReq.ClientID != "" {
-		if disconnectedInfo, ok := s.disconnectedClients[authReq.ClientID]; ok {
+		if info, ok := s.disconnectedClients[authReq.ClientID]; ok {
+			disconnectedInfo = info
 			if time.Since(disconnectedInfo.DisconnectedAt) <= 30*time.Second {
 				// Re-connecting client within the 30-second window
 				clientInfo = disconnectedInfo.ClientInfo
@@ -260,7 +262,6 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 	if len(s.clients) >= s.config.MAX_CLIENTS {
 		log.Println("Max clients reached. Rejecting new connection.")
 		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Server is full"}})
-		s.mu.Unlock() // Explicit unlock before returning
 		return
 	}
 

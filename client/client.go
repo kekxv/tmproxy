@@ -90,7 +90,13 @@ func Run(args []string) {
 		controlConn, _, err := websocket.DefaultDialer.Dial(*serverAddr, nil)
 		if err != nil {
 			log.Printf("Failed to connect to server: %v. Retrying in %v...", err, reconnectDelay)
-			time.Sleep(reconnectDelay)
+			timer := time.NewTimer(reconnectDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 			continue
 		}
 
@@ -108,7 +114,13 @@ func Run(args []string) {
 			// For other auth errors (e.g., network issues), retry.
 			log.Println("Retrying in 5 seconds...")
 			controlConn.Close()
-			time.Sleep(reconnectDelay)
+			timer := time.NewTimer(reconnectDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 			continue
 		}
 		clientState.ClientID = newClientID
@@ -124,7 +136,13 @@ func Run(args []string) {
 		if err := requestProxy(controlConn, *remotePort, *localAddr, clientState.ClientID); err != nil {
 			log.Printf("Failed to request proxy: %v. Retrying in %v...", err, reconnectDelay)
 			controlConn.Close()
-			time.Sleep(reconnectDelay)
+			timer := time.NewTimer(reconnectDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 			continue
 		}
 
@@ -141,7 +159,13 @@ func Run(args []string) {
 
 		default:
 			log.Printf("Connection to server lost. Attempting to reconnect in %v...", reconnectDelay)
-			time.Sleep(reconnectDelay)
+			timer := time.NewTimer(reconnectDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
 		}
 	}
 }
