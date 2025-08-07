@@ -17,10 +17,10 @@ type AuthRequest struct {
 // AuthResponse is the payload for an authentication response from the server.
 // It indicates whether the authentication was successful.
 type AuthResponse struct {
-	Success  bool           `json:"success"`
-	Message  string         `json:"message"`
-	ClientID string         `json:"client_id"`
-	Forwards map[int]string `json:"forwards"`
+	Success  bool            `json:"success"`
+	Message  string          `json:"message"`
+	ClientID string          `json:"client_id"`
+	Forwards []ForwardConfig `json:"forwards"`
 }
 
 // ProxyRequest is the payload for a client's request to start proxying.

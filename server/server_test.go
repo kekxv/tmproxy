@@ -16,11 +16,13 @@ import (
 // setupTestServer creates a new server instance with a mock configuration for testing.
 func setupTestServer() (*Server, *common.Config) {
 	config := &common.Config{
-		LISTEN_ADDR:         "127.0.0.1:0", // Use port 0 to let the OS pick a free port
-		MAX_CLIENTS:         5,
-		WEBSOCKET_PATH:      "/test_ws",
-		DEFAULT_REMOTE_PORT: 8080,
-		TOTP_SECRET_KEY:     "JBSWY3DPEHPK3PXP", // A fixed key for predictable tests
+		LISTEN_ADDR:    "127.0.0.1:0", // Use port 0 to let the OS pick a free port
+		MAX_CLIENTS:    5,
+		WEBSOCKET_PATH: "/test_ws",
+		FORWARD: []common.ForwardConfig{
+			{REMOTE_PORT: 8080, LOCAL_ADDR: "127.0.0.1:3000"},
+		},
+		TOTP_SECRET_KEY: "JBSWY3DPEHPK3PXP", // A fixed key for predictable tests
 	}
 	return NewServer(config), config
 }
@@ -107,7 +109,7 @@ func TestProxyRequestFlow(t *testing.T) {
 	ws.ReadJSON(&authResp) // Consume auth response
 
 	// Send proxy request.
-	proxyReq := common.Message{Type: "proxy_request", Payload: common.ProxyRequest{RemotePort: 9999}}
+	proxyReq := common.Message{Type: "proxy_request", Payload: common.ProxyRequest{RemotePort: 9999, LocalAddr: "127.0.0.1:3000"}}
 	err = ws.WriteJSON(proxyReq)
 	assert.NoError(t, err)
 

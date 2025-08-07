@@ -122,17 +122,28 @@ func (s *Server) handleAddForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// This logic is similar to handling 'proxy_request' from a client
-	if existingLocalAddr, ok := client.Forwards[req.RemotePort]; ok && existingLocalAddr != req.LocalAddr {
-		log.Printf("Admin: Local address for remote port %d changed from %s to %s. Restarting listener.", req.RemotePort, existingLocalAddr, req.LocalAddr)
-		if listener, listenerOk := client.Listeners[req.RemotePort]; listenerOk {
-			listener.Close()
-			delete(client.Listeners, req.RemotePort)
+	found := false
+	for i, forward := range client.Forwards {
+		if forward.REMOTE_PORT == req.RemotePort {
+			// Update existing forward
+			client.Forwards[i].LOCAL_ADDR = req.LocalAddr
+			found = true
+			log.Printf("Admin: Local address for remote port %d changed to %s. Restarting listener.", req.RemotePort, req.LocalAddr)
+			if listener, listenerOk := client.Listeners[req.RemotePort]; listenerOk {
+				listener.Close() // Close the old listener
+				delete(client.Listeners, req.RemotePort)
+				log.Printf("Admin: Closed existing listener for remote port %d.", req.RemotePort)
+			}
+			break
 		}
 	}
-	client.Forwards[req.RemotePort] = req.LocalAddr
+	if !found {
+		// Add new forward
+		client.Forwards = append(client.Forwards, common.ForwardConfig{REMOTE_PORT: req.RemotePort, LOCAL_ADDR: req.LocalAddr})
+	}
 	s.mu.Unlock()
 
-	go s.startProxyListener(client, req.RemotePort)
+	go s.startProxyListener(client, req.RemotePort, req.LocalAddr)
 
 	// Notify the client about the change.
 	// This is important so the client knows which local address to use for the new forward.

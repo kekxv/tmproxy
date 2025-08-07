@@ -9,18 +9,22 @@ import (
 	"github.com/pquerna/otp/totp"
 )
 
+type ForwardConfig struct {
+	REMOTE_PORT int    `json:"REMOTE_PORT"`
+	LOCAL_ADDR  string `json:"LOCAL_ADDR"`
+}
+
 // Config defines the structure for the server configuration.
 // It includes settings for the listener, proxying, and security.
 // Note: Field names are in uppercase to match the JSON file format.
 type Config struct {
-	LISTEN_ADDR         string `json:"LISTEN_ADDR"`
-	MAX_CLIENTS         int    `json:"MAX_CLIENTS"`
-	WEBSOCKET_PATH      string `json:"WEBSOCKET_PATH"`
-	DEFAULT_REMOTE_PORT int    `json:"DEFAULT_REMOTE_PORT"`
-	DEFAULT_LOCAL_PORT  int    `json:"DEFAULT_LOCAL_PORT"`
-	TOTP_SECRET_KEY     string `json:"TOTP_SECRET_KEY"`
-	TLS_CERT_FILE       string `json:"TLS_CERT_FILE,omitempty"`
-	TLS_KEY_FILE        string `json:"TLS_KEY_FILE,omitempty"`
+	LISTEN_ADDR     string          `json:"LISTEN_ADDR"`
+	MAX_CLIENTS     int             `json:"MAX_CLIENTS"`
+	WEBSOCKET_PATH  string          `json:"WEBSOCKET_PATH"`
+	FORWARD         []ForwardConfig `json:"FORWARD"`
+	TOTP_SECRET_KEY string          `json:"TOTP_SECRET_KEY"`
+	TLS_CERT_FILE   string          `json:"TLS_CERT_FILE,omitempty"`
+	TLS_KEY_FILE    string          `json:"TLS_KEY_FILE,omitempty"`
 
 	// Admin Panel Configuration
 	ADMIN_USERNAME        string `json:"ADMIN_USERNAME"`
@@ -63,14 +67,18 @@ func createDefaultConfig(path string) (*Config, error) {
 	}
 
 	config := &Config{
-		LISTEN_ADDR:         "0.0.0.0:8001",
-		MAX_CLIENTS:         100,
-		WEBSOCKET_PATH:      "/proxy_ws",
-		DEFAULT_REMOTE_PORT: 8080,
-		DEFAULT_LOCAL_PORT:  3000,
-		TOTP_SECRET_KEY:     key.Secret(),
-		TLS_CERT_FILE:       "",
-		TLS_KEY_FILE:        "",
+		LISTEN_ADDR:    "0.0.0.0:8001",
+		MAX_CLIENTS:    100,
+		WEBSOCKET_PATH: "/proxy_ws",
+		FORWARD: []ForwardConfig{
+			{
+				REMOTE_PORT: 8080,
+				LOCAL_ADDR:  "127.0.0.1:3000",
+			},
+		},
+		TOTP_SECRET_KEY: key.Secret(),
+		TLS_CERT_FILE:   "",
+		TLS_KEY_FILE:    "",
 
 		// Admin Panel Configuration
 		ADMIN_USERNAME:        "admin",

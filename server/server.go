@@ -46,15 +46,16 @@ type DisconnectedClientInfo struct {
 
 // ClientInfo stores information about a connected client.
 type ClientInfo struct {
-	ID          string               `json:"id"`
-	RemoteAddr  string               `json:"remote_addr"`
-	ConnectedAt time.Time            `json:"connected_at"`
-	Conn        *websocket.Conn      `json:"-"`
-	Listeners   map[int]net.Listener `json:"-"`        // Map of remote port to listener
-	Forwards    map[int]string       `json:"forwards"` // Map of remote port to local address
-	sendChan    chan common.Message  // Channel for sending messages to this client
-	done        chan struct{}        // Channel to signal client disconnection
-	mu          sync.Mutex           // Mutex to protect access to Listeners and Forwards
+	ID          string                 `json:"id"`
+	RemoteAddr  string                 `json:"remote_addr"`
+	ConnectedAt time.Time              `json:"connected_at"`
+	Conn        *websocket.Conn        `json:"-"`
+	Listeners   map[int]net.Listener   `json:"-"`        // Map of remote port to listener
+	Forwards    []common.ForwardConfig `json:"forwards"` // Array of forward configurations
+	sendChan    chan common.Message    // Channel for sending messages to this client
+	done        chan struct{}          // Channel to signal client disconnection
+	mu          sync.Mutex             // Mutex to protect access to Listeners and Forwards
+	cleanupOnce sync.Once              // Ensures cleanup is performed only once
 }
 
 // TCPConnectionInfo stores information about an active TCP connection.
@@ -170,15 +171,13 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	data := struct {
-		ServerHTTPURL     string
-		ServerWsURL       string
-		DefaultLocalPort  int
-		DefaultRemotePort int
+		ServerHTTPURL string
+		ServerWsURL   string
+		Forwards      []common.ForwardConfig
 	}{
-		ServerHTTPURL:     serverHTTPURL,
-		ServerWsURL:       serverWsURL,
-		DefaultLocalPort:  s.config.DEFAULT_LOCAL_PORT,
-		DefaultRemotePort: s.config.DEFAULT_REMOTE_PORT,
+		ServerHTTPURL: serverHTTPURL,
+		ServerWsURL:   serverWsURL,
+		Forwards:      s.config.FORWARD,
 	}
 
 	w.Header().Set("Content-Type", "text/html")
@@ -251,9 +250,10 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 				log.Printf("Client reconnected: %s (ID: %s)", conn.RemoteAddr(), authReq.ClientID)
 
 				// Reactivate existing forwards for the reconnected client
-				for remotePort, localAddr := range clientInfo.Forwards {
-					log.Printf("Reactivating forward for client %s: remote %d -> local %s", clientInfo.ID, remotePort, localAddr)
-					go s.startProxyListener(clientInfo, remotePort)
+				// Reactivate existing forwards for the reconnected client
+				for _, forward := range clientInfo.Forwards {
+					log.Printf("Reactivating forward for client %s: remote %d -> local %s", clientInfo.ID, forward.REMOTE_PORT, forward.LOCAL_ADDR)
+					go s.startProxyListener(clientInfo, forward.REMOTE_PORT, forward.LOCAL_ADDR)
 				}
 			} else {
 				// Client ID expired, remove it
@@ -271,7 +271,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			ConnectedAt: time.Now(),
 			Conn:        conn,
 			Listeners:   make(map[int]net.Listener),
-			Forwards:    make(map[int]string),
+			Forwards:    []common.ForwardConfig{},
 			sendChan:    make(chan common.Message, 100), // Buffered channel for sending messages
 			done:        make(chan struct{}),            // Initialize done channel
 		}
@@ -323,17 +323,27 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 
 			s.mu.Lock() // Acquire lock for modifying clientInfo.Forwards and Listeners
 			// Check if the forward already exists and if the local address has changed
-			if existingLocalAddr, ok := clientInfo.Forwards[req.RemotePort]; ok && existingLocalAddr != req.LocalAddr {
-				log.Printf("handleControlChannel: Local address for remote port %d changed from %s to %s. Restarting listener.", req.RemotePort, existingLocalAddr, req.LocalAddr)
-				if listener, listenerOk := clientInfo.Listeners[req.RemotePort]; listenerOk {
-					listener.Close() // Close the old listener
-					delete(clientInfo.Listeners, req.RemotePort)
-					log.Printf("handleControlChannel: Closed existing listener for remote port %d.", req.RemotePort)
+			found := false
+			for i, forward := range clientInfo.Forwards {
+				if forward.REMOTE_PORT == req.RemotePort {
+					// Update existing forward
+					clientInfo.Forwards[i].LOCAL_ADDR = req.LocalAddr
+					found = true
+					log.Printf("handleControlChannel: Local address for remote port %d changed to %s. Restarting listener.", req.RemotePort, req.LocalAddr)
+					if listener, listenerOk := clientInfo.Listeners[req.RemotePort]; listenerOk {
+						listener.Close() // Close the old listener
+						delete(clientInfo.Listeners, req.RemotePort)
+						log.Printf("handleControlChannel: Closed existing listener for remote port %d.", req.RemotePort)
+					}
+					break
 				}
 			}
-			clientInfo.Forwards[req.RemotePort] = req.LocalAddr
+			if !found {
+				// Add new forward
+				clientInfo.Forwards = append(clientInfo.Forwards, common.ForwardConfig{REMOTE_PORT: req.RemotePort, LOCAL_ADDR: req.LocalAddr})
+			}
 			s.mu.Unlock() // Release lock
-			go s.startProxyListener(clientInfo, req.RemotePort)
+			go s.startProxyListener(clientInfo, req.RemotePort, req.LocalAddr)
 		case "local_connect_failed":
 			var failedConn common.LocalConnectFailed
 			payloadBytes, _ := json.Marshal(msg.Payload)
@@ -356,14 +366,16 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 
 	// Cleanup after the loop exits
 	s.mu.Lock()
-	// Close all listeners associated with this client immediately
-	for _, listener := range clientInfo.Listeners {
-		listener.Close()
-	}
-	// Close the send channel to stop the write goroutine
-	close(clientInfo.sendChan)
-	// Close the done channel to signal all related goroutines to stop
-	close(clientInfo.done)
+	clientInfo.cleanupOnce.Do(func() {
+		// Close all listeners associated with this client immediately
+		for _, listener := range clientInfo.Listeners {
+			listener.Close()
+		}
+		// Close the send channel to stop the write goroutine
+		close(clientInfo.sendChan)
+		// Close the done channel to signal all related goroutines to stop
+		close(clientInfo.done)
+	})
 
 	// Move client to disconnectedClients map with timestamp
 	s.disconnectedClients[clientInfo.ID] = &DisconnectedClientInfo{
@@ -407,7 +419,7 @@ func (s *Server) authenticateClient(conn *websocket.Conn) (bool, common.AuthRequ
 	return true, authReq
 }
 
-func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
+func (s *Server) startProxyListener(client *ClientInfo, remotePort int, localAddr string) {
 	s.mu.Lock()
 	// If a listener for this remotePort already exists, close it and remove it.
 	// This ensures that a new listener is always created if startProxyListener is called.
@@ -444,7 +456,7 @@ func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
 	}()
 
 	publicURL := fmt.Sprintf("http://<your-server-ip>:%d", remotePort)
-	log.Printf("Started public listener for client %s on %s", client.RemoteAddr, listenAddr)
+	log.Printf("Started public listener for client %s on %s, forwarding to %s", client.RemoteAddr, listenAddr, localAddr)
 	select {
 	case client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: true, PublicURL: publicURL}}:
 	case <-client.done:
@@ -599,14 +611,16 @@ func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// Close all listeners associated with this client
-		for _, listener := range client.Listeners {
-			listener.Close()
-		}
-		// Close the send channel to stop the write goroutine
-		close(client.sendChan)
-		// Close the done channel to signal all related goroutines to stop
-		close(client.done)
+		client.cleanupOnce.Do(func() {
+			// Close all listeners associated with this client
+			for _, listener := range client.Listeners {
+				listener.Close()
+			}
+			// Close the send channel to stop the write goroutine
+			close(client.sendChan)
+			// Close the done channel to signal all related goroutines to stop
+			close(client.done)
+		})
 
 		// Move client to disconnectedClients map with timestamp
 		s.disconnectedClients[client.ID] = &DisconnectedClientInfo{
@@ -681,12 +695,25 @@ func (c *ClientInfo) RemoveForward(remotePort int) error {
 
 	listener, ok := c.Listeners[remotePort]
 	if !ok {
-		return fmt.Errorf("no forward found for remote port %d", remotePort)
+		return fmt.Errorf("no listener found for remote port %d", remotePort)
 	}
 
 	listener.Close()
 	delete(c.Listeners, remotePort)
-	delete(c.Forwards, remotePort)
+
+	// Find and remove the forward configuration from the slice
+	found := false
+	for i, forward := range c.Forwards {
+		if forward.REMOTE_PORT == remotePort {
+			c.Forwards = append(c.Forwards[:i], c.Forwards[i+1:]...)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		return fmt.Errorf("no forward configuration found for remote port %d", remotePort)
+	}
 
 	log.Printf("Forward for client %s on remote port %d removed.", c.ID, remotePort)
 	return nil
