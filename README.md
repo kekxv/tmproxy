@@ -56,22 +56,33 @@ To start the tmproxy in server mode:
   "LISTEN_ADDR": "0.0.0.0:8001",
   "MAX_CLIENTS": 100,
   "WEBSOCKET_PATH": "/proxy_ws",
-  "DEFAULT_REMOTE_PORT": 8080,
-  "DEFAULT_LOCAL_PORT": 3000,
+  "FORWARD": [
+    {
+      "REMOTE_PORT": 8080,
+      "LOCAL_ADDR": "127.0.0.1:3000"
+    }
+  ],
   "TOTP_SECRET_KEY": "RANDOM_BASE32_ENCODED_STRING",
   "TLS_CERT_FILE": "",
-  "TLS_KEY_FILE": ""
+  "TLS_KEY_FILE": "",
+  "ADMIN_USERNAME": "admin",
+  "ADMIN_PASSWORD_HASH": "changeme",
+  "ADMIN_TOTP_SECRET_KEY": "",
+  "ENABLE_ADMIN_TOTP": false
 }
 ```
 
 *   `LISTEN_ADDR`: The address and port the server will listen on.
 *   `MAX_CLIENTS`: Maximum concurrent client connections.
 *   `WEBSOCKET_PATH`: The WebSocket endpoint path.
-*   `DEFAULT_REMOTE_PORT`: Default public port requested by clients.
-*   `DEFAULT_LOCAL_PORT`: Default local service port for clients.
+*   `FORWARD`: An array of forwarding configurations. Each entry specifies a `REMOTE_PORT` (publicly accessible port on the server) and a `LOCAL_ADDR` (the address of the service on the client machine).
 *   `TOTP_SECRET_KEY`: The secret key for TOTP authentication. **DO NOT SHARE THIS!**
 *   `TLS_CERT_FILE`: Path to your TLS certificate file (e.g., `server.crt`). Leave empty for HTTP/WS.
 *   `TLS_KEY_FILE`: Path to your TLS private key file (e.g., `server.key`). Leave empty for HTTP/WS.
+*   `ADMIN_USERNAME`: Username for the admin panel.
+*   `ADMIN_PASSWORD_HASH`: BCrypt hash of the admin panel password. Change the default!
+*   `ADMIN_TOTP_SECRET_KEY`: TOTP secret key for the admin panel (optional).
+*   `ENABLE_ADMIN_TOTP`: Boolean to enable or disable TOTP for the admin panel.
 
 **For HTTPS/WSS**: Place your `server.crt` and `server.key` files in the same directory as `config.json` and update `TLS_CERT_FILE` and `TLS_KEY_FILE` in the config.
 

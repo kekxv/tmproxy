@@ -35,8 +35,12 @@ func TestLoadConfig(t *testing.T) {
 		"LISTEN_ADDR": "127.0.0.1:9000",
 		"MAX_CLIENTS": 50,
 		"WEBSOCKET_PATH": "/ws",
-		"DEFAULT_REMOTE_PORT": 9090,
-		"DEFAULT_LOCAL_PORT": 4000,
+		"FORWARD": [
+			{
+				"REMOTE_PORT": 9090,
+				"LOCAL_ADDR": "127.0.0.1:4000"
+			}
+		],
 		"TOTP_SECRET_KEY": "JBSWY3DPEHPK3PXP"
 	}`
 	err := os.WriteFile(path, []byte(content), 0644)

@@ -56,22 +56,33 @@ tmproxy 是一个轻量级、安全且易于分发的反向代理（或内网穿
   "LISTEN_ADDR": "0.0.0.0:8001",
   "MAX_CLIENTS": 100,
   "WEBSOCKET_PATH": "/proxy_ws",
-  "DEFAULT_REMOTE_PORT": 8080,
-  "DEFAULT_LOCAL_PORT": 3000,
+  "FORWARD": [
+    {
+      "REMOTE_PORT": 8080,
+      "LOCAL_ADDR": "127.0.0.1:3000"
+    }
+  ],
   "TOTP_SECRET_KEY": "RANDOM_BASE32_ENCODED_STRING",
   "TLS_CERT_FILE": "",
-  "TLS_KEY_FILE": ""
+  "TLS_KEY_FILE": "",
+  "ADMIN_USERNAME": "admin",
+  "ADMIN_PASSWORD_HASH": "changeme",
+  "ADMIN_TOTP_SECRET_KEY": "",
+  "ENABLE_ADMIN_TOTP": false
 }
 ```
 
 *   `LISTEN_ADDR`: 服务器将监听的地址和端口。
 *   `MAX_CLIENTS`: 最大并发客户端连接数。
 *   `WEBSOCKET_PATH`: WebSocket 端点路径。
-*   `DEFAULT_REMOTE_PORT`: 客户端请求的默认公共端口。
-*   `DEFAULT_LOCAL_PORT`: 客户端的默认本地服务端口。
+*   `FORWARD`: 一个转发配置数组。每个条目指定一个 `REMOTE_PORT`（服务器上可公开访问的端口）和一个 `LOCAL_ADDR`（客户端机器上服务的地址）。
 *   `TOTP_SECRET_KEY`: 用于 TOTP 认证的密钥。**请勿共享此密钥！**
 *   `TLS_CERT_FILE`: TLS 证书文件的路径（例如 `server.crt`）。留空表示使用 HTTP/WS。
 *   `TLS_KEY_FILE`: TLS 私钥文件的路径（例如 `server.key`）。留空表示使用 HTTP/WS。
+*   `ADMIN_USERNAME`: 管理面板的用户名。
+*   `ADMIN_PASSWORD_HASH`: 管理面板密码的 BCrypt 哈希值。请更改默认值！
+*   `ADMIN_TOTP_SECRET_KEY`: 管理面板的 TOTP 密钥（可选）。
+*   `ENABLE_ADMIN_TOTP`: 布尔值，用于启用或禁用管理面板的 TOTP。
 
 **对于 HTTPS/WSS**: 将您的 `server.crt` 和 `server.key` 文件放在与 `config.json` 相同的目录中，并更新 `config.json` 中的 `TLS_CERT_FILE` 和 `TLS_KEY_FILE`。
 
