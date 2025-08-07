@@ -1,32 +1,107 @@
 document.addEventListener('DOMContentLoaded', () => {
     const clientsTableBody = document.getElementById('clientsTable').querySelector('tbody');
     const connectionsTableBody = document.getElementById('connectionsTable').querySelector('tbody');
-    const addForwardForm = document.getElementById('addForwardForm');
-    const addClientIdSelect = document.getElementById('addClientId');
+
+    // Custom Modal Elements
+    const customModal = document.getElementById('customModal');
+    const modalTitle = document.getElementById('modalTitle');
+    const modalMessage = document.getElementById('modalMessage');
+    const modalInput = document.getElementById('modalInput');
+    const modalRemotePortInput = document.getElementById('modalRemotePortInput');
+    const modalLocalAddrInput = document.getElementById('modalLocalAddrInput');
+    const modalConfirmBtn = document.getElementById('modalConfirmBtn');
+    const modalCancelBtn = document.getElementById('modalCancelBtn');
+    const modalAlertBtn = document.getElementById('modalAlertBtn');
+    const closeButton = document.querySelector('.close-button');
+
+    let resolveModalPromise;
+
+    function showModal(title, message, type, defaultValue = '') {
+        return new Promise(resolve => {
+            modalTitle.textContent = title;
+            modalMessage.textContent = message;
+            modalInput.value = defaultValue;
+
+            // Hide all specific input/button types initially
+            modalConfirmBtn.style.display = 'none';
+            modalCancelBtn.style.display = 'none';
+            modalAlertBtn.style.display = 'none';
+            modalInput.style.display = 'none';
+            modalRemotePortInput.style.display = 'none';
+            modalLocalAddrInput.style.display = 'none';
+
+            if (type === 'alert') {
+                modalAlertBtn.style.display = 'inline-block';
+            } else if (type === 'confirm') {
+                modalConfirmBtn.style.display = 'inline-block';
+                modalCancelBtn.style.display = 'inline-block';
+            } else if (type === 'prompt') {
+                modalInput.style.display = 'block';
+                modalConfirmBtn.style.display = 'inline-block';
+                modalCancelBtn.style.display = 'inline-block';
+            } else if (type === 'addForwardPrompt') {
+                modalRemotePortInput.value = ''; // Clear previous values
+                modalLocalAddrInput.value = '';
+                modalRemotePortInput.style.display = 'block';
+                modalLocalAddrInput.style.display = 'block';
+                modalConfirmBtn.style.display = 'inline-block';
+                modalCancelBtn.style.display = 'inline-block';
+            }
+
+            customModal.style.display = 'block';
+            resolveModalPromise = resolve;
+        });
+    }
+
+    closeButton.onclick = () => {
+        customModal.style.display = 'none';
+        resolveModalPromise(null); // Resolve with null if closed without action
+    };
+
+    window.onclick = (event) => {
+        if (event.target === customModal) {
+            customModal.style.display = 'none';
+            resolveModalPromise(null); // Resolve with null if clicked outside
+        }
+    };
+
+    modalAlertBtn.onclick = () => {
+        customModal.style.display = 'none';
+        resolveModalPromise(true);
+    };
+
+    modalConfirmBtn.onclick = () => {
+        customModal.style.display = 'none';
+        if (modalInput.style.display === 'block') {
+            resolveModalPromise(modalInput.value);
+        } else if (modalRemotePortInput.style.display === 'block') {
+            resolveModalPromise({
+                remotePort: parseInt(modalRemotePortInput.value),
+                localAddr: modalLocalAddrInput.value
+            });
+        } else {
+            resolveModalPromise(true);
+        }
+    };
+
+    modalCancelBtn.onclick = () => {
+        customModal.style.display = 'none';
+        resolveModalPromise(false);
+    };
 
     async function fetchData() {
         try {
             const clientsResponse = await fetch('/api/admin/clients');
             const clients = await clientsResponse.json();
             renderClients(clients);
-            populateClientIdSelect(clients);
 
             const connectionsResponse = await fetch('/api/admin/connections');
             const connections = await connectionsResponse.json();
             renderConnections(connections);
         } catch (error) {
             console.error('Error fetching data:', error);
+            await showModal('Error', 'Error fetching data: ' + error.message, 'alert');
         }
-    }
-
-    function populateClientIdSelect(clients) {
-        addClientIdSelect.innerHTML = '<option value="">Select Client ID</option>'; // Clear existing options
-        clients.forEach(client => {
-            const option = document.createElement('option');
-            option.value = client.id;
-            option.textContent = `${client.id} (${client.remote_addr})`;
-            addClientIdSelect.appendChild(option);
-        });
     }
 
     function renderClients(clients) {
@@ -48,7 +123,12 @@ document.addEventListener('DOMContentLoaded', () => {
                     const deleteButton = document.createElement('button');
                     deleteButton.textContent = 'Del';
                     deleteButton.className = 'delete-button';
-                    deleteButton.onclick = () => deleteForward(client.id, remotePort);
+                    deleteButton.onclick = async () => {
+                        const confirmed = await showModal('Confirm Delete', `Are you sure you want to delete forward for client ${client.id} on remote port ${remotePort}?`, 'confirm');
+                        if (confirmed) {
+                            deleteForward(client.id, remotePort);
+                        }
+                    };
                     forwardDiv.appendChild(deleteButton);
 
                     forwardsCell.appendChild(forwardDiv);
@@ -56,10 +136,33 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
             const actionsCell = row.insertCell();
+
+            // Add Forward button
+            const addForwardButton = document.createElement('button');
+            addForwardButton.textContent = 'Add Forward';
+            addForwardButton.className = 'add-forward-button';
+            addForwardButton.onclick = async () => {
+                const result = await showModal('Add New Forward', 'Please enter the remote port and local address:', 'addForwardPrompt');
+                if (result) {
+                    const { remotePort, localAddr } = result;
+                    if (isNaN(remotePort) || remotePort <= 0 || !localAddr) {
+                        await showModal('Input Error', 'Please enter a valid remote port and local address.', 'alert');
+                        return;
+                    }
+                    addForward(client.id, remotePort, localAddr);
+                }
+            };
+            actionsCell.appendChild(addForwardButton);
+
             const disconnectButton = document.createElement('button');
             disconnectButton.textContent = 'Disconnect';
-            disconnectButton.className = 'delete-button'; // Reusing style
-            disconnectButton.onclick = () => disconnectClient(client.id);
+            disconnectButton.className = 'delete-button';
+            disconnectButton.onclick = async () => {
+                const confirmed = await showModal('Confirm Disconnect', `Are you sure you want to disconnect client ${client.id}?`, 'confirm');
+                if (confirmed) {
+                    disconnectClient(client.id);
+                }
+            };
             actionsCell.appendChild(disconnectButton);
         });
     }
@@ -77,12 +180,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    addForwardForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        const clientId = addClientIdSelect.value;
-        const remotePort = parseInt(document.getElementById('addRemotePort').value);
-        const localAddr = document.getElementById('addLocalAddr').value;
-
+    async function addForward(clientId, remotePort, localAddr) {
         try {
             const response = await fetch('/api/admin/forwards', {
                 method: 'POST',
@@ -93,22 +191,18 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (result.success) {
-                alert('Forward added successfully!');
-                addForwardForm.reset();
+                await showModal('Success', 'Forward added successfully!', 'alert');
                 fetchData(); // Refresh data
             } else {
-                alert(`Failed to add forward: ${result.message}`);
+                await showModal('Error', `Failed to add forward: ${result.message}`, 'alert');
             }
         } catch (error) {
             console.error('Error adding forward:', error);
-            alert('Error adding forward.');
+            await showModal('Error', 'Error adding forward.', 'alert');
         }
-    });
+    }
 
     async function disconnectClient(clientId) {
-        if (!confirm(`Are you sure you want to disconnect client ${clientId}?`)) {
-            return;
-        }
         try {
             const response = await fetch('/api/admin/disconnect', {
                 method: 'POST',
@@ -119,21 +213,18 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (result.success) {
-                alert('Client disconnected successfully!');
+                await showModal('Success', 'Client disconnected successfully!', 'alert');
                 fetchData(); // Refresh data
             } else {
-                alert(`Failed to disconnect client: ${result.message}`);
+                await showModal('Error', `Failed to disconnect client: ${result.message}`, 'alert');
             }
         } catch (error) {
             console.error('Error disconnecting client:', error);
-            alert('Error disconnecting client.');
+            await showModal('Error', 'Error disconnecting client.', 'alert');
         }
     }
 
     async function deleteForward(clientId, remotePort) {
-        if (!confirm(`Are you sure you want to delete forward for client ${clientId} on remote port ${remotePort}?`)) {
-            return;
-        }
         try {
             const response = await fetch('/api/admin/delete_forward', {
                 method: 'POST',
@@ -144,14 +235,14 @@ document.addEventListener('DOMContentLoaded', () => {
             });
             const result = await response.json();
             if (result.success) {
-                alert('Forward deleted successfully!');
+                await showModal('Success', 'Forward deleted successfully!', 'alert');
                 fetchData(); // Refresh data
             } else {
-                alert(`Failed to delete forward: ${result.message}`);
+                await showModal('Error', `Failed to delete forward: ${result.message}`, 'alert');
             }
         } catch (error) {
             console.error('Error deleting forward:', error);
-            alert('Error deleting forward.');
+            await showModal('Error', 'Error deleting forward.', 'alert');
         }
     }
 

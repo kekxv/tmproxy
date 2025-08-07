@@ -69,6 +69,7 @@
             padding: 5px 10px;
             border-radius: 4px;
             cursor: pointer;
+            margin-left: 2px;
         }
         .delete-button:hover {
             background-color: #c82333;
@@ -79,16 +80,20 @@
     <div class="admin-container">
         <h1>Admin Dashboard</h1>
 
-        <div class="admin-section">
-            <h3>Add New Forward</h3>
-            <form id="addForwardForm" class="add-forward-form">
-                <select id="addClientId" required>
-                    <option value="">Select Client ID</option>
-                </select>
-                <input type="number" id="addRemotePort" placeholder="Remote Port" required>
-                <input type="text" id="addLocalAddr" placeholder="Local Address (e.g., localhost:3000)" required>
-                <button type="submit">Add Forward</button>
-            </form>
+        <div id="customModal" class="modal">
+            <div class="modal-content">
+                <span class="close-button">&times;</span>
+                <h2 id="modalTitle"></h2>
+                <p id="modalMessage"></p>
+                <input type="text" id="modalInput" style="display: none;">
+                <input type="number" id="modalRemotePortInput" placeholder="Remote Port" style="display: none;">
+                <input type="text" id="modalLocalAddrInput" placeholder="Local Address (e.g., localhost:3000)" style="display: none;">
+                <div class="modal-buttons">
+                    <button id="modalConfirmBtn" style="display: none;">OK</button>
+                    <button id="modalCancelBtn" style="display: none;">Cancel</button>
+                    <button id="modalAlertBtn" style="display: none;">OK</button>
+                </div>
+            </div>
         </div>
 
         <div class="admin-section">

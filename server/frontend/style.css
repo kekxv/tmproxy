@@ -9,3 +9,103 @@ p { margin-bottom: 1em; }
 .copy-btn:hover { background-color: #0056b3; }
 .copy-feedback { position: absolute; top: 10px; right: 80px; background-color: #28a745; color: white; padding: 8px 12px; border-radius: 5px; font-size: 0.8em; opacity: 0; transition: opacity 0.3s ease; }
 .copy-feedback.show { opacity: 1; }
+
+/* Modal Styles */
+.modal {
+    display: none; /* Hidden by default */
+    position: fixed; /* Stay in place */
+    z-index: 1; /* Sit on top */
+    left: 0;
+    top: 0;
+    width: 100%; /* Full width */
+    height: 100%; /* Full height */
+    overflow: auto; /* Enable scroll if needed */
+    background-color: rgba(0,0,0,0.4); /* Black w/ opacity */
+    padding-top: 60px;
+}
+
+.modal-content {
+    background-color: #fefefe;
+    margin: 5% auto; /* 15% from the top and centered */
+    padding: 20px;
+    border: 1px solid #888;
+    width: 80%; /* Could be more or less, depending on screen size */
+    max-width: 500px;
+    border-radius: 8px;
+    box-shadow: 0 5px 15px rgba(0,0,0,0.3);
+    position: relative;
+}
+
+.close-button {
+    color: #aaa;
+    float: right;
+    font-size: 28px;
+    font-weight: bold;
+}
+
+.close-button:hover,
+.close-button:focus {
+    color: black;
+    text-decoration: none;
+    cursor: pointer;
+}
+
+.modal-buttons {
+    text-align: right;
+    margin-top: 20px;
+}
+
+.modal-buttons button {
+    padding: 10px 20px;
+    margin-left: 10px;
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    font-size: 16px;
+}
+
+#modalConfirmBtn, #modalAlertBtn {
+    background-color: #007bff;
+    color: white;
+}
+
+#modalConfirmBtn:hover, #modalAlertBtn:hover {
+    background-color: #0056b3;
+}
+
+#modalCancelBtn {
+    background-color: #6c757d;
+    color: white;
+}
+
+#modalCancelBtn:hover {
+    background-color: #5a6268;
+}
+
+#modalInput, #modalRemotePortInput, #modalLocalAddrInput {
+    width: calc(100% - 20px);
+    padding: 10px;
+    margin-top: 15px;
+    border: 1px solid #ddd;
+    border-radius: 4px;
+}
+
+.add-forward-button {
+    background-color: #28a745;
+    color: white;
+    border: none;
+    padding: 5px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    margin-right: 2px;
+}
+
+.add-forward-button:hover {
+    background-color: #218838;
+}
+
+.admin-section .actions-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
