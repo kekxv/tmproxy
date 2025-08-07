@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard - tmproxy</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <style>
+        /* Admin specific styles */
+        .admin-container {
+            max-width: 1200px;
+            margin: 2em auto;
+            padding: 30px;
+            background-color: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .admin-section {
+            margin-bottom: 2em;
+            border: 1px solid #eee;
+            border-radius: 5px;
+            padding: 1em;
+        }
+        .admin-section h3 {
+            color: #0056b3;
+            margin-top: 0;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 1em;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        .add-forward-form {
+            display: flex;
+            gap: 10px;
+            margin-top: 1em;
+        }
+        .add-forward-form input[type="text"],
+        .add-forward-form input[type="number"],
+        .add-forward-form select {
+            flex: 1;
+            padding: 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+        }
+        .add-forward-form button {
+            padding: 8px 15px;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .add-forward-form button:hover {
+            background-color: #218838;
+        }
+        .delete-button {
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            padding: 5px 10px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .delete-button:hover {
+            background-color: #c82333;
+        }
+    </style>
+</head>
+<body>
+    <div class="admin-container">
+        <h1>Admin Dashboard</h1>
+
+        <div class="admin-section">
+            <h3>Add New Forward</h3>
+            <form id="addForwardForm" class="add-forward-form">
+                <select id="addClientId" required>
+                    <option value="">Select Client ID</option>
+                </select>
+                <input type="number" id="addRemotePort" placeholder="Remote Port" required>
+                <input type="text" id="addLocalAddr" placeholder="Local Address (e.g., localhost:3000)" required>
+                <button type="submit">Add Forward</button>
+            </form>
+        </div>
+
+        <div class="admin-section">
+            <h3>Connected Clients</h3>
+            <table id="clientsTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Remote Address</th>
+                        <th>Connected At</th>
+                        <th>Forwards</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Client data will be loaded here by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+
+        <div class="admin-section">
+            <h3>Active TCP Connections</h3>
+            <table id="connectionsTable">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Tunnel ID</th>
+                        <th>Client ID</th>
+                        <th>Client Address</th>
+                        <th>Server Address</th>
+                        <th>Connected At</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <!-- Connection data will be loaded here by JavaScript -->
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <script src="/static/admin.js"></script>
+</body>
+</html>

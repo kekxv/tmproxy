@@ -60,3 +60,15 @@ type AddProxy struct {
 	RemotePort int    `json:"remote_port"`
 	LocalAddr  string `json:"local_addr"`
 }
+
+// DelForwardRequest is a message from the admin to delete a forward.
+type DelForwardRequest struct {
+	ClientID   string `json:"client_id"`
+	RemotePort int    `json:"remote_port"`
+}
+
+// DelForwardResponse is the response to a DelForwardRequest.
+type DelForwardResponse struct {
+	Success bool   `json:"success"`
+	Message string `json:"message"`
+}

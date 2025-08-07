@@ -53,6 +53,8 @@ type ClientInfo struct {
 	Listeners   map[int]net.Listener `json:"-"`        // Map of remote port to listener
 	Forwards    map[int]string       `json:"forwards"` // Map of remote port to local address
 	sendChan    chan common.Message  // Channel for sending messages to this client
+	done        chan struct{}        // Channel to signal client disconnection
+	mu          sync.Mutex           // Mutex to protect access to Listeners and Forwards
 }
 
 // TCPConnectionInfo stores information about an active TCP connection.
@@ -108,6 +110,7 @@ func Run(args []string) {
 	http.HandleFunc("/api/admin/connections", server.requireAdminAuth(server.handleApiConnections))
 	http.HandleFunc("/api/admin/disconnect", server.requireAdminAuth(server.handleApiDisconnect))
 	http.HandleFunc("/api/admin/forwards", server.requireAdminAuth(server.handleAddForward))
+	http.HandleFunc("/api/admin/delete_forward", server.requireAdminAuth(server.handleApiDeleteForward))
 
 	// Start a goroutine to clean up disconnected clients
 	go server.cleanupDisconnectedClients()
@@ -185,6 +188,20 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) handleAdminDashboard(w http.ResponseWriter, r *http.Request) {
+	tmpl, err := template.ParseFS(frontendFS, "frontend/admin.html")
+	if err != nil {
+		log.Printf("Error parsing admin template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+		return
+	}
+
+	if err := tmpl.Execute(w, nil); err != nil {
+		log.Printf("Error executing admin template: %v", err)
+		http.Error(w, "Internal Server Error", http.StatusInternalServerError)
+	}
+}
+
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	tunnelID := r.URL.Query().Get("tunnel_id")
 	clientID := r.URL.Query().Get("client_id")
@@ -229,6 +246,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 				clientInfo.RemoteAddr = conn.RemoteAddr().String()
 				clientInfo.ConnectedAt = time.Now()
 				clientInfo.sendChan = make(chan common.Message, 100) // Re-initialize send channel
+				clientInfo.done = make(chan struct{})                // Re-initialize done channel
 				delete(s.disconnectedClients, authReq.ClientID)
 				log.Printf("Client reconnected: %s (ID: %s)", conn.RemoteAddr(), authReq.ClientID)
 
@@ -255,6 +273,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			Listeners:   make(map[int]net.Listener),
 			Forwards:    make(map[int]string),
 			sendChan:    make(chan common.Message, 100), // Buffered channel for sending messages
+			done:        make(chan struct{}),                // Initialize done channel
 		}
 		log.Printf("New client connected: %s (ID: %s)", conn.RemoteAddr(), clientInfo.ID)
 	}
@@ -343,6 +362,8 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 	}
 	// Close the send channel to stop the write goroutine
 	close(clientInfo.sendChan)
+	// Close the done channel to signal all related goroutines to stop
+	close(clientInfo.done)
 
 	// Move client to disconnectedClients map with timestamp
 	s.disconnectedClients[clientInfo.ID] = &DisconnectedClientInfo{
@@ -398,7 +419,12 @@ func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
 	listener, err := net.Listen("tcp", listenAddr)
 	if err != nil {
 		log.Printf("Failed to start listener on %s for client %s: %v", listenAddr, client.ID, err)
-		client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: false, Message: err.Error()}}
+		// Send error response to client if possible, and then return
+		select {
+		case client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: false, Message: err.Error()}}:
+		case <-client.done:
+			// Client disconnected, do nothing
+		}
 		return
 	}
 
@@ -416,9 +442,22 @@ func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
 
 	publicURL := fmt.Sprintf("http://<your-server-ip>:%d", remotePort)
 	log.Printf("Started public listener for client %s on %s", client.RemoteAddr, listenAddr)
-	client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: true, PublicURL: publicURL}}
+	select {
+	case client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: true, PublicURL: publicURL}}:
+	case <-client.done:
+		// Client disconnected, do nothing
+		return
+	}
 
 	for {
+		select {
+		case <-client.done:
+			log.Printf("Client %s disconnected, stopping listener for port %d.", client.ID, remotePort)
+			return // Exit goroutine if client disconnected
+		default:
+			// Continue to accept connections
+		}
+
 		publicConn, err := listener.Accept()
 		if err != nil {
 			// If the listener was closed, return from the goroutine
@@ -435,7 +474,14 @@ func (s *Server) startProxyListener(client *ClientInfo, remotePort int) {
 		s.activeTunnels[tunnelID] <- publicConn
 
 		msg := common.Message{Type: "new_conn", Payload: common.NewConnection{TunnelID: tunnelID, ClientID: client.ID, RemotePort: remotePort}}
-		client.sendChan <- msg
+		select {
+		case client.sendChan <- msg:
+		case <-client.done:
+			// Client disconnected, close publicConn and return
+			publicConn.Close()
+			log.Printf("Client %s disconnected while sending new_conn message, closing public connection for tunnel %s.", client.ID, tunnelID)
+			return
+		}
 	}
 }
 
@@ -519,4 +565,51 @@ func (s *Server) handleClientDownload(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%s", binaryName))
 	w.Header().Set("Content-Type", "application/octet-stream")
 	http.ServeFile(w, r, clientPath)
+}
+
+func (s *Server) handleApiDeleteForward(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Only POST method is allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req common.DelForwardRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	client, ok := s.clients[req.ClientID]
+	if !ok {
+		json.NewEncoder(w).Encode(common.DelForwardResponse{Success: false, Message: "Client not found"})
+		return
+	}
+
+	if err := client.RemoveForward(req.RemotePort); err != nil {
+		json.NewEncoder(w).Encode(common.DelForwardResponse{Success: false, Message: err.Error()})
+		return
+	}
+
+	json.NewEncoder(w).Encode(common.DelForwardResponse{Success: true, Message: "Forward deleted successfully"})
+}
+
+// RemoveForward safely closes the listener and removes the forward from the client.
+func (c *ClientInfo) RemoveForward(remotePort int) error {
+	c.mu.Lock() // ClientInfo also needs a mutex for concurrent access to Listeners and Forwards
+	defer c.mu.Unlock()
+
+	listener, ok := c.Listeners[remotePort]
+	if !ok {
+		return fmt.Errorf("no forward found for remote port %d", remotePort)
+	}
+
+	listener.Close()
+	delete(c.Listeners, remotePort)
+	delete(c.Forwards, remotePort)
+
+	log.Printf("Forward for client %s on remote port %d removed.", c.ID, remotePort)
+	return nil
 }

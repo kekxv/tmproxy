@@ -343,6 +343,17 @@ func listenForNewConnections(ctx context.Context, controlConn *websocket.Conn, s
 				state.mu.Unlock()
 				log.Printf("Dynamically added new forward: remote port %d -> local %s", addProxyPayload.RemotePort, addProxyPayload.LocalAddr)
 
+			case "forwards_updated": // Handle updated forwards from server
+				var updatedForwards map[int]string
+				if err := unmarshalPayload(msg.Payload, &updatedForwards); err != nil {
+					log.Printf("Error unmarshalling forwards_updated payload: %v", err)
+					continue
+				}
+				state.mu.Lock()
+				state.Forwards = updatedForwards
+				state.mu.Unlock()
+				log.Printf("Client received updated forwards from server: %+v", updatedForwards)
+
 			default:
 				log.Printf("Received unknown message type: %s", msg.Type)
 			}
