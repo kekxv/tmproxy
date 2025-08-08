@@ -304,23 +304,11 @@ func listenForNewConnections(ctx context.Context, controlConn WebSocketConn, ser
 		}
 	}()
 
-	// Goroutine to send pings to keep the connection alive.
-	go func() {
-		ticker := time.NewTicker(pingInterval)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-ticker.C:
-				deadline := time.Now().Add(5 * time.Second)
-				if err := controlConn.WriteControl(websocket.PingMessage, nil, deadline); err != nil {
-					log.Printf("Pinger: Failed to send ping: %v", err)
-					return
-				}
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
+	// 使用 Pinger 替代内联的 ping goroutine，使得在断开/重连时可以可靠停止旧定时任务。
+	p := NewPinger(pingInterval)
+	// 在本函数返回时确保停止 pinger，避免残留定时任务写入已关闭的连接。
+	defer p.Stop()
+	p.Start(controlConn)
 
 	// Main loop to process messages and errors.
 	for {

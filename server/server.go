@@ -46,6 +46,9 @@ type Server struct {
 type DisconnectedClientInfo struct {
 	ClientInfo     *ClientInfo
 	DisconnectedAt time.Time
+	// NoReconnect indicates that this disconnected client was forcefully disconnected
+	// (e.g. by an admin) and must not be allowed to reconnect using the same client ID.
+	NoReconnect bool
 }
 
 // ClientInfo stores information about a connected client.
@@ -272,7 +275,18 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 	if authReq.ClientID != "" {
 		if info, ok := s.disconnectedClients[authReq.ClientID]; ok {
 			disconnectedInfo = info
-			if time.Since(disconnectedInfo.DisconnectedAt) <= 30*time.Second {
+
+			// If this disconnected record was marked as NoReconnect (admin forced),
+			// do NOT allow reuse of the client ID. Remove the record and treat as expired.
+			if disconnectedInfo.NoReconnect {
+				// Ensure proxy user mapping is cleaned up (if any)
+				if disconnectedInfo.ClientInfo != nil && disconnectedInfo.ClientInfo.ProxyUser != "" {
+					delete(s.proxyUsers, disconnectedInfo.ClientInfo.ProxyUser)
+					log.Printf("Proxy user '%s' freed up due to admin invalidation of client ID %s.", disconnectedInfo.ClientInfo.ProxyUser, authReq.ClientID)
+				}
+				delete(s.disconnectedClients, authReq.ClientID)
+				log.Printf("Client ID %s was invalidated by admin; rejecting reconnect. Assigning new ID.", authReq.ClientID)
+			} else if time.Since(disconnectedInfo.DisconnectedAt) <= 30*time.Second {
 				// Re-connecting client within the 30-second window
 				clientInfo = disconnectedInfo.ClientInfo
 				clientInfo.Conn = conn // Update with new connection
@@ -283,7 +297,6 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 				delete(s.disconnectedClients, authReq.ClientID)
 				log.Printf("Client reconnected: %s (ID: %s)", conn.RemoteAddr(), authReq.ClientID)
 
-				// Reactivate existing forwards for the reconnected client
 				// Reactivate existing forwards for the reconnected client
 				for _, forward := range clientInfo.Forwards {
 					log.Printf("Reactivating forward for client %s: remote %d -> local %s", clientInfo.ID, forward.REMOTE_PORT, forward.LOCAL_ADDR)
@@ -701,10 +714,16 @@ func (s *Server) handleApiDisconnect(w http.ResponseWriter, r *http.Request) {
 			close(client.done)
 		})
 
-		// Move client to disconnectedClients map with timestamp
+		// Move client to disconnectedClients map with timestamp and mark as no-reconnect
 		s.disconnectedClients[client.ID] = &DisconnectedClientInfo{
 			ClientInfo:     client,
 			DisconnectedAt: time.Now(),
+			NoReconnect:    true,
+		}
+		// Release proxy user mapping immediately to free the username for others
+		if client.ProxyUser != "" {
+			delete(s.proxyUsers, client.ProxyUser)
+			log.Printf("Proxy user '%s' freed up due to admin disconnect.", client.ProxyUser)
 		}
 		delete(s.clients, client.ID)
 		// Find and delete from connToClientID map
