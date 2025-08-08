@@ -243,9 +243,12 @@ func authenticate(conn WebSocketConn, token, totpSecret, clientID, proxyUser, pr
 		return "", fmt.Errorf("server rejected authentication: %s", authResp.Message)
 	}
 
-	// Update client's forwards with data from server
+	// If no forwards were specified on the command line, use the list from the server.
+	// Otherwise, the command-line forwards take precedence.
 	state.mu.Lock()
-	state.Forwards = authResp.Forwards
+	if len(state.Forwards) == 0 {
+		state.Forwards = authResp.Forwards
+	}
 	state.mu.Unlock()
 
 	return authResp.ClientID, nil
