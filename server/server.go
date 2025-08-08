@@ -29,16 +29,16 @@ var frontendFS embed.FS
 type Server struct {
 	config               *common.Config
 	upgrader             websocket.Upgrader
-	clients              map[string]*ClientInfo               // Map of client ID to ClientInfo
-	connToClientID       map[*websocket.Conn]string           // Reverse map for quick lookup
+	clients              map[string]*ClientInfo     // Map of client ID to ClientInfo
+	connToClientID       map[*websocket.Conn]string // Reverse map for quick lookup
 	activeTunnels        map[string]chan net.Conn
 	mu                   sync.Mutex
 	activeTCPConnections map[string]*TCPConnectionInfo
 	adminSessions        map[string]bool
-	disconnectedClients  map[string]*DisconnectedClientInfo   // Map of client ID to DisconnectedClientInfo
-	proxyUsers           map[string]string                    // Map of proxy user to client ID
-	httpProxyUsers       map[string]string                    // Map of http proxy username to password
-	pendingRequests      map[string]chan common.HttpResponse // Map of request ID to response channel
+	disconnectedClients  map[string]*DisconnectedClientInfo     // Map of client ID to DisconnectedClientInfo
+	proxyUsers           map[string]string                      // Map of proxy user to client ID
+	httpProxyUsers       map[string]string                      // Map of http proxy username to password
+	pendingRequests      map[string]chan common.HttpResponse    // Map of request ID to response channel
 	pendingConnects      map[string]chan common.ConnectResponse // Map of tunnel ID to connect response channel
 }
 
@@ -206,10 +206,12 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 		ServerHTTPURL string
 		ServerWsURL   string
 		Forwards      []common.ForwardConfig
+		ProxyUsers    []common.ProxyUser
 	}{
 		ServerHTTPURL: serverHTTPURL,
 		ServerWsURL:   serverWsURL,
 		Forwards:      s.config.FORWARD,
+		ProxyUsers:    s.config.PROXY_USERS,
 	}
 
 	w.Header().Set("Content-Type", "text/html")

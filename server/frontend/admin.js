@@ -110,6 +110,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const row = clientsTableBody.insertRow();
             row.insertCell().textContent = client.id;
             row.insertCell().textContent = client.remote_addr;
+            const proxyUserCell = row.insertCell();
+            proxyUserCell.textContent = client.proxy_user || 'N/A';
             row.insertCell().textContent = new Date(client.connected_at).toLocaleString();
 
             const forwardsCell = row.insertCell();

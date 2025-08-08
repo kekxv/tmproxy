@@ -23,12 +23,36 @@
             <button class="copy-btn" onclick="copyToClipboard('windows-cmd', this)">Copy</button>
             <span class="copy-feedback">Copied!</span>
         </div>
-        <p><b>Usage</b></p>
+        {{if .ProxyUsers}}
+        <h2>Usage Options</h2>
+        <p>This server is configured for HTTP/HTTPS Proxy Mode. You can connect a client to either forward ports or to serve as a proxy endpoint.</p>
+
+        <p><b>1. Forwarding Mode Usage</b></p>
         <div class="code-block">
-            <pre id="usage-cmd">./tmproxy client --server {{.ServerWsURL}} --local localhost:3000 --remote 3000</pre>
+            <pre id="usage-cmd-forward">./tmproxy client --server {{.ServerWsURL}} --local localhost:3000 --remote 8080</pre>
+            <button class="copy-btn" onclick="copyToClipboard('usage-cmd-forward', this)">Copy</button>
+            <span class="copy-feedback">Copied!</span>
+        </div>
+
+        <p><b>2. Proxy Mode Usage</b></p>
+        <p>Connect a client to handle proxy requests for a specific user. Choose one of the configured users below:</p>
+        {{range .ProxyUsers}}
+        <div class="code-block">
+            <pre id="proxy-usage-{{.Username}}">./tmproxy client --server {{$.ServerWsURL}} --proxy_user {{.Username}} --proxy_passwd {{.Password}}</pre>
+            <button class="copy-btn" onclick="copyToClipboard('proxy-usage-{{.Username}}', this)">Copy</button>
+            <span class="copy-feedback">Copied!</span>
+        </div>
+        {{end}}
+
+        {{else}}
+        <h2>Usage</h2>
+        <p><b>Forwarding Mode</b></p>
+        <div class="code-block">
+            <pre id="usage-cmd">./tmproxy client --server {{.ServerWsURL}} --local localhost:3000 --remote 8080</pre>
             <button class="copy-btn" onclick="copyToClipboard('usage-cmd', this)">Copy</button>
             <span class="copy-feedback">Copied!</span>
         </div>
+        {{end}}
     </div>
     <script src="/static/script.js"></script>
 </body>
