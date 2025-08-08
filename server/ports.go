@@ -21,8 +21,8 @@ func isPortAllowed(port int, allowedPorts string) bool {
 			if len(rangeParts) != 2 {
 				continue // Invalid range
 			}
-			start, err1 := strconv.Atoi(rangeParts[0])
-			end, err2 := strconv.Atoi(rangeParts[1])
+			start, err1 := strconv.Atoi(strings.TrimSpace(rangeParts[0]))
+			end, err2 := strconv.Atoi(strings.TrimSpace(rangeParts[1]))
 			if err1 != nil || err2 != nil {
 				continue // Invalid number in range
 			}
