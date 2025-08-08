@@ -28,7 +28,6 @@
             <span class="copy-feedback">Copied!</span>
         </div>
         
-        {{if .ProxyUsers}}
         <h2>使用选项 (Usage Options)</h2>
         <p>此服务器配置为 HTTP/HTTPS 代理模式。您可以连接客户端以转发端口或作为代理端点。</p>
         <p>This server is configured for HTTP/HTTPS Proxy Mode. You can connect a client to either forward ports or to serve as a proxy endpoint.</p>
@@ -43,24 +42,12 @@
         <p><b>2. 代理模式使用方法 (Proxy Mode Usage)</b></p>
         <p>连接客户端以处理特定用户的代理请求。请选择以下配置的用户之一：</p>
         <p>Connect a client to handle proxy requests for a specific user. Choose one of the configured users below:</p>
-        {{range .ProxyUsers}}
         <div class="code-block">
-            <pre id="proxy-usage-{{.Username}}">./tmproxy client --server {{$.ServerWsURL}} --proxy_user {{.Username}} --proxy_passwd {{.Password}}</pre>
-            <button class="copy-btn" onclick="copyToClipboard('proxy-usage-{{.Username}}', this)">Copy</button>
+            <pre id="proxy-usage-admin">./tmproxy client --server {{$.ServerWsURL}} --proxy_user admin --proxy_passwd admin</pre>
+            <button class="copy-btn" onclick="copyToClipboard('proxy-usage-admin', this)">Copy</button>
             <span class="copy-feedback">Copied!</span>
         </div>
-        {{end}}
 
-        {{else}}
-        <h2>使用方法 (Usage)</h2>
-        <p><b>转发模式 (Forwarding Mode)</b></p>
-        <div class="code-block">
-            <pre id="usage-cmd">./tmproxy client --server {{.ServerWsURL}} --local localhost:3000 --remote 8080</pre>
-            <button class="copy-btn" onclick="copyToClipboard('usage-cmd', this)">Copy</button>
-            <span class="copy-feedback">Copied!</span>
-        </div>
-        {{end}}
-        
         <h2>客户端配置示例 (Client Configuration Example)</h2>
         <p>您可以创建一个<code>config.json</code>文件来存储客户端配置，而无需在命令行中输入所有参数。</p>
         <p>You can create a <code>config.json</code> file to store client configuration instead of entering all parameters on the command line.</p>

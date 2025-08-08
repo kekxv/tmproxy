@@ -210,12 +210,10 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 		ServerHTTPURL string
 		ServerWsURL   string
 		Forwards      []common.ForwardConfig
-		ProxyUsers    []common.ProxyUser
 	}{
 		ServerHTTPURL: serverHTTPURL,
 		ServerWsURL:   serverWsURL,
 		Forwards:      s.config.FORWARD,
-		ProxyUsers:    s.config.PROXY_USERS,
 	}
 
 	w.Header().Set("Content-Type", "text/html")
