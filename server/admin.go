@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"time"
 
 	"github.com/gemini-cli/tmproxy/common"
 	"github.com/google/uuid"
@@ -201,6 +202,25 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}
+
+func (s *Server) handleGetTOTP(w http.ResponseWriter, r *http.Request) {
+	if s.config.TOTP_SECRET_KEY == "" {
+		w.WriteHeader(http.StatusNotFound)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Client TOTP secret key is not set."})
+		return
+	}
+
+	totpCode, err := totp.GenerateCode(s.config.TOTP_SECRET_KEY, time.Now())
+	if err != nil {
+		log.Printf("Error generating client TOTP code: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Failed to generate client TOTP code."})
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"totp": totpCode})
 }
 
 func (s *Server) requireAdminAuth(next http.HandlerFunc) http.HandlerFunc {

@@ -132,6 +132,7 @@ func Run(args []string) {
 	mainMux.HandleFunc("/api/admin/disconnect", server.requireAdminAuth(server.handleApiDisconnect))
 	mainMux.HandleFunc("/api/admin/forwards", server.requireAdminAuth(server.handleAddForward))
 	mainMux.HandleFunc("/api/admin/delete_forward", server.requireAdminAuth(server.handleApiDeleteForward))
+	mainMux.HandleFunc("/api/admin/totp", server.requireAdminAuth(server.handleGetTOTP))
 
 	// Start a goroutine to clean up disconnected clients
 	go server.cleanupDisconnectedClients()
