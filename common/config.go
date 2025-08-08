@@ -37,6 +37,7 @@ type Config struct {
 	ADMIN_PASSWORD_HASH   string `json:"ADMIN_PASSWORD_HASH"` // Store hashed password
 	ADMIN_TOTP_SECRET_KEY string `json:"ADMIN_TOTP_SECRET_KEY"`
 	ENABLE_ADMIN_TOTP     bool   `json:"ENABLE_ADMIN_TOTP"`
+	ALLOWED_PORTS         string `json:"ALLOWED_PORTS,omitempty"`
 }
 
 // LoadConfig reads the configuration from a JSON file.
@@ -91,6 +92,7 @@ func createDefaultConfig(path string) (*Config, error) {
 		ADMIN_PASSWORD_HASH:   "changeme", // IMPORTANT: Change this default password in your config file!
 		ADMIN_TOTP_SECRET_KEY: "",         // Leave empty to disable TOTP for admin, or generate one
 		ENABLE_ADMIN_TOTP:     false,
+		ALLOWED_PORTS:         "", // Example: "8000-9000,9099"
 	}
 
 	data, err := json.MarshalIndent(config, "", "  ")

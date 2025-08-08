@@ -113,6 +113,13 @@ func (s *Server) handleAddForward(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check if the requested port is allowed
+	if !isPortAllowed(req.RemotePort, s.config.ALLOWED_PORTS) {
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Requested port is not allowed"})
+		return
+	}
+
 	s.mu.Lock()
 	client, ok := s.clients[req.ClientID]
 	if !ok {

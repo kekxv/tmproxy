@@ -374,6 +374,13 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			json.Unmarshal(payloadBytes, &req)
 			log.Printf("handleControlChannel: Client %s requested proxy for remote port %d to local %s", clientInfo.ID, req.RemotePort, req.LocalAddr)
 
+			// Check if the requested port is allowed before proceeding
+			if !isPortAllowed(req.RemotePort, s.config.ALLOWED_PORTS) {
+				log.Printf("Client %s requested a disallowed port: %d", clientInfo.ID, req.RemotePort)
+				clientInfo.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: false, Message: "Requested port is not allowed"}}
+				continue // Continue to next message
+			}
+
 			s.mu.Lock() // Acquire lock for modifying clientInfo.Forwards and Listeners
 			// Check if the forward already exists and if the local address has changed
 			found := false
