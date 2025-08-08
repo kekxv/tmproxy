@@ -12,6 +12,10 @@
 *.out
 *.out
 /tmproxy*
-# Configuration file
+# Server configuration file
 config.json
+
+# Client configuration file
+client_config.json
+
 .DS_Store

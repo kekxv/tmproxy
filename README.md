@@ -163,6 +163,33 @@ After starting the server, open its homepage in a web browser (e.g., `http://loc
 
 When prompted, enter the 6-digit TOTP code from your authenticator app.
 
+#### Client Configuration File
+
+The client can also read configuration from a JSON file. By default, it looks for a `config.json` file in the current directory, but you can specify a different path using the `--config` flag.
+
+**Example Client Configuration (`config.json`)**:
+
+```json
+{
+  "SERVER_ADDR": "ws://your-server-ip:8001/proxy_ws",
+  "PROXY_USER": "user1",
+  "PROXY_PASSWD": "a_very_strong_password",
+  "TOTP_SECRET_KEY": "YOUR_TOTP_SECRET_KEY"
+}
+```
+
+With a configuration file, you can run the client with fewer command-line arguments:
+
+```bash
+./tmproxy client
+```
+
+Command-line arguments take precedence over the configuration file, allowing you to override specific settings when needed:
+
+```bash
+./tmproxy client --totp-secret NEW_SECRET
+```
+
 ### Distributing Clients
 
 For robust client distribution, place your cross-compiled binaries (e.g., `tmproxy-linux-amd64`, `tmproxy-windows-amd64.exe`) into a `clients/` directory relative to your server executable. The server will then serve these specific binaries when requested by clients with `os` and `arch` query parameters.

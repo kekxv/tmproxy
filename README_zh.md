@@ -163,6 +163,33 @@ curl -v -x http://user1:一个非常健壮的密码@your-server-ip:8001 https://
 
 当提示时，输入您的身份验证器应用中的 6 位 TOTP 码。
 
+#### 客户端配置文件
+
+客户端也可以从 JSON 文件中读取配置。默认情况下，它会在当前目录中查找 `config.json` 文件，但您可以使用 `--config` 标志指定不同的路径。
+
+**客户端配置示例 (`config.json`)**:
+
+```json
+{
+  "SERVER_ADDR": "ws://your-server-ip:8001/proxy_ws",
+  "PROXY_USER": "user1",
+  "PROXY_PASSWD": "一个非常健壮的密码",
+  "TOTP_SECRET_KEY": "YOUR_TOTP_SECRET_KEY"
+}
+```
+
+有了配置文件，您可以使用更少的命令行参数来运行客户端：
+
+```bash
+./tmproxy client
+```
+
+命令行参数优先于配置文件，允许您在需要时覆盖特定设置：
+
+```bash
+./tmproxy client --totp-secret NEW_SECRET
+```
+
 ### 分发客户端
 
 为了实现可靠的客户端分发，请将您的交叉编译的二进制文件（例如 `tmproxy-linux-amd64`, `tmproxy-windows-amd64.exe`）放置在服务器可执行文件相对的 `clients/` 目录中。然后，服务器将在客户端通过 `os` 和 `arch` 查询参数请求时，提供这些特定的二进制文件。

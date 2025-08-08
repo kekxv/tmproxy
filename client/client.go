@@ -44,7 +44,7 @@ const (
 type ClientState struct {
 	mu       sync.RWMutex
 	Forwards []common.ForwardConfig // Array of forward configurations
-	ClientID string         // Client's unique ID, assigned by server
+	ClientID string                 // Client's unique ID, assigned by server
 }
 
 // Run starts the client mode of the application.
@@ -53,15 +53,43 @@ type ClientState struct {
 func Run(args []string) {
 	// Define and parse command-line flags.
 	fs := flag.NewFlagSet("client", flag.ExitOnError)
+	configFile := fs.String("config", "config.json", "Path to the configuration file")
 	serverAddr := fs.String("server", "", "Server WebSocket URL (e.g., ws://localhost:8001/proxy_ws)")
 	proxyUser := fs.String("proxy_user", "", "Proxy username for authentication")
 	proxyPasswd := fs.String("proxy_passwd", "", "Proxy password for authentication")
-	
+
 	totpSecret := fs.String("totp-secret", "", "TOTP secret key for long-term authentication")
 	fs.Parse(args)
 
+	// Load configuration from file if it exists
+	var config *common.ClientConfig
+	if _, err := os.Stat(*configFile); err == nil {
+		config, err = common.LoadClientConfig(*configFile)
+		if err != nil {
+			log.Printf("Warning: Failed to load config file: %v", err)
+		}
+	} else {
+		log.Printf("Config file '%s' not found, using command line arguments only.", *configFile)
+	}
+
+	// Command line arguments take precedence over config file
 	if *serverAddr == "" {
-		log.Fatal("Server URL is required. Use the --server flag.")
+		if config != nil && config.ServerAddr != "" {
+			*serverAddr = config.ServerAddr
+		} else {
+			log.Fatal("Server URL is required. Use the --server flag or define it in the config file.")
+		}
+	}
+
+	// Use config values if command line arguments are not provided
+	if *proxyUser == "" && config != nil && config.ProxyUser != "" {
+		*proxyUser = config.ProxyUser
+	}
+	if *proxyPasswd == "" && config != nil && config.ProxyPasswd != "" {
+		*proxyPasswd = config.ProxyPasswd
+	}
+	if *totpSecret == "" && config != nil && config.TOTPSecretKey != "" {
+		*totpSecret = config.TOTPSecretKey
 	}
 
 	clientState := &ClientState{
@@ -142,7 +170,6 @@ func Run(args []string) {
 		log.Println("Authentication successful.")
 
 		// Reset state on successful connection and send initial proxy request
-		
 
 		// This function blocks until the connection is lost or the context is cancelled.
 		listenForNewConnections(ctx, controlConn, *serverAddr, clientState)
