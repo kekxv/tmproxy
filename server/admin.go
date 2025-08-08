@@ -114,7 +114,18 @@ func (s *Server) handleAddForward(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Check if the requested port is allowed
-	if !isPortAllowed(req.RemotePort, s.config.ALLOWED_PORTS) {
+	if req.RemotePort == 0 {
+		// Admin requested a random port
+		newPort, err := s.findAvailablePort()
+		if err != nil {
+			log.Printf("Failed to find an available port for client %s: %v", req.ClientID, err)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "No available ports for random assignment"})
+			return
+		}
+		req.RemotePort = newPort
+		log.Printf("Assigned random port %d to client %s by admin", req.RemotePort, req.ClientID)
+	} else if !isPortAllowed(req.RemotePort, s.config.ALLOWED_PORTS) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]interface{}{"success": false, "message": "Requested port is not allowed"})
 		return

@@ -187,11 +187,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 const result = await showModal('Add New Forward', 'Please enter the remote port and local address:', 'addForwardPrompt');
                 if (result) {
                     const {remotePort, localAddr} = result;
-                    if (isNaN(remotePort) || remotePort <= 0 || !localAddr) {
+                    if (!localAddr) {
                         await showModal('Input Error', 'Please enter a valid remote port and local address.', 'alert');
                         return;
                     }
-                    addForward(client.id, remotePort, localAddr);
+                    addForward(client.id, (isNaN(remotePort) || remotePort <= 0) ? 0 : remotePort, localAddr);
                 }
             };
             actionsCell.appendChild(addForwardButton);

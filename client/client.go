@@ -99,8 +99,10 @@ func Run(args []string) {
 		ClientID: "", // Initialize with empty ID
 	}
 
-	// If local and remote are provided, add them to the forwards list
-	if *localAddr != "" && *remotePort != 0 {
+	// If local is provided but remote is not, set remote to 0 to request a random port from the server.
+	if *localAddr != "" && *remotePort == 0 {
+		clientState.Forwards = append(clientState.Forwards, common.ForwardConfig{LOCAL_ADDR: *localAddr, REMOTE_PORT: 0})
+	} else if *localAddr != "" && *remotePort != 0 {
 		clientState.Forwards = append(clientState.Forwards, common.ForwardConfig{LOCAL_ADDR: *localAddr, REMOTE_PORT: *remotePort})
 	}
 

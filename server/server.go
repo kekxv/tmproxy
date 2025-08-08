@@ -375,7 +375,17 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			log.Printf("handleControlChannel: Client %s requested proxy for remote port %d to local %s", clientInfo.ID, req.RemotePort, req.LocalAddr)
 
 			// Check if the requested port is allowed before proceeding
-			if !isPortAllowed(req.RemotePort, s.config.ALLOWED_PORTS) {
+			if req.RemotePort == 0 {
+				// Client requested a random port
+				newPort, err := s.findAvailablePort()
+				if err != nil {
+					log.Printf("Failed to find an available port for client %s: %v", clientInfo.ID, err)
+					clientInfo.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: false, Message: "No available ports for random assignment"}}
+					continue
+				}
+				req.RemotePort = newPort
+				log.Printf("Assigned random port %d to client %s", req.RemotePort, clientInfo.ID)
+			} else if !isPortAllowed(req.RemotePort, s.config.ALLOWED_PORTS) {
 				log.Printf("Client %s requested a disallowed port: %d", clientInfo.ID, req.RemotePort)
 				clientInfo.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: false, Message: "Requested port is not allowed"}}
 				continue // Continue to next message
@@ -553,7 +563,7 @@ func (s *Server) startProxyListener(client *ClientInfo, remotePort int, localAdd
 		log.Printf("Closed listener on %s for client %s", listenAddr, client.ID)
 	}()
 
-	publicURL := fmt.Sprintf("http://<your-server-ip>:%d", remotePort)
+	publicURL := fmt.Sprintf("tcp://<your-server-ip>:%d or http(s)://<your-server-ip>:%d", remotePort, remotePort)
 	log.Printf("Started public listener for client %s on %s, forwarding to %s", client.RemoteAddr, listenAddr, localAddr)
 	select {
 	case client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: true, PublicURL: publicURL}}:
