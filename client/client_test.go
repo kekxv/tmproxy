@@ -40,7 +40,7 @@ func TestUnmarshalPayload(t *testing.T) {
 
 	// Test with invalid payload
 	invalidPayload := map[string]interface{}{
-		"name": 123, // Should be string
+		"name": 123,      // Should be string
 		"age":  "thirty", // Should be int
 	}
 
@@ -416,35 +416,35 @@ func TestHandleNewTunnelWithValidLocalAddress(t *testing.T) {
 func TestListenForNewConnections(t *testing.T) {
 	// Create a mock WebSocket connection
 	mockConn := &mocks.MockWebSocketConn{}
-	
+
 	// Set up expectations for the mock
 	mockConn.On("SetReadDeadline", mock.AnythingOfType("time.Time")).Return(nil)
 	mockConn.On("SetPongHandler", mock.AnythingOfType("func(string) error")).Return()
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Return(fmt.Errorf("test error"))
-	
+
 	// Create a client state
 	clientState := &ClientState{
 		Forwards: []common.ForwardConfig{},
 		ClientID: "test-client-id",
 	}
-	
+
 	// Create a context that we can cancel
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Run listenForNewConnections in a separate goroutine
 	go func() {
 		listenForNewConnections(ctx, mockConn, "", clientState)
 	}()
-	
+
 	// Give it a moment to start
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Cancel the context to stop the function
 	cancel()
-	
+
 	// Give it a moment to finish
 	time.Sleep(10 * time.Millisecond)
-	
+
 	mockConn.AssertExpectations(t)
 }
 
@@ -452,11 +452,12 @@ func TestListenForNewConnections(t *testing.T) {
 func TestListenForNewConnectionsWithNewConnMessage(t *testing.T) {
 	// Create a mock WebSocket connection
 	mockConn := &mocks.MockWebSocketConn{}
-	
+
 	// Set up expectations for the mock
 	mockConn.On("SetReadDeadline", mock.AnythingOfType("time.Time")).Return(nil)
 	mockConn.On("SetPongHandler", mock.AnythingOfType("func(string) error")).Return()
-	
+	mockConn.On("WriteJSON", mock.AnythingOfType("common.Message")).Return(nil).Maybe()
+
 	// Simulate receiving a new_conn message, then an error to exit the loop
 	callCount := 0
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Run(func(args mock.Arguments) {
@@ -476,7 +477,7 @@ func TestListenForNewConnectionsWithNewConnMessage(t *testing.T) {
 		}
 	}).Return(nil).Once()
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Return(fmt.Errorf("test error")).Once()
-	
+
 	// Create a client state
 	clientState := &ClientState{
 		Forwards: []common.ForwardConfig{
@@ -487,24 +488,24 @@ func TestListenForNewConnectionsWithNewConnMessage(t *testing.T) {
 		},
 		ClientID: "test-client-id",
 	}
-	
+
 	// Create a context that we can cancel
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Run listenForNewConnections in a separate goroutine
 	go func() {
 		listenForNewConnections(ctx, mockConn, "", clientState)
 	}()
-	
+
 	// Give it a moment to start
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Cancel the context to stop the function
 	cancel()
-	
+
 	// Give it a moment to finish
 	time.Sleep(10 * time.Millisecond)
-	
+
 	mockConn.AssertExpectations(t)
 }
 
@@ -512,11 +513,11 @@ func TestListenForNewConnectionsWithNewConnMessage(t *testing.T) {
 func TestListenForNewConnectionsWithAddProxyMessage(t *testing.T) {
 	// Create a mock WebSocket connection
 	mockConn := &mocks.MockWebSocketConn{}
-	
+
 	// Set up expectations for the mock
 	mockConn.On("SetReadDeadline", mock.AnythingOfType("time.Time")).Return(nil)
 	mockConn.On("SetPongHandler", mock.AnythingOfType("func(string) error")).Return()
-	
+
 	// Simulate receiving an add_proxy message, then an error to exit the loop
 	callCount := 0
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Run(func(args mock.Arguments) {
@@ -535,7 +536,7 @@ func TestListenForNewConnectionsWithAddProxyMessage(t *testing.T) {
 		}
 	}).Return(nil).Once()
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Return(fmt.Errorf("test error")).Once()
-	
+
 	// Create a client state
 	clientState := &ClientState{
 		Forwards: []common.ForwardConfig{
@@ -546,31 +547,31 @@ func TestListenForNewConnectionsWithAddProxyMessage(t *testing.T) {
 		},
 		ClientID: "test-client-id",
 	}
-	
+
 	// Create a context that we can cancel
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Run listenForNewConnections in a separate goroutine
 	go func() {
 		listenForNewConnections(ctx, mockConn, "", clientState)
 	}()
-	
+
 	// Give it a moment to start
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Cancel the context to stop the function
 	cancel()
-	
+
 	// Give it a moment to finish
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Verify that the forward was added
 	clientState.mu.RLock()
 	assert.Equal(t, 2, len(clientState.Forwards))
 	assert.Equal(t, 8081, clientState.Forwards[1].REMOTE_PORT)
 	assert.Equal(t, "127.0.0.1:3001", clientState.Forwards[1].LOCAL_ADDR)
 	clientState.mu.RUnlock()
-	
+
 	mockConn.AssertExpectations(t)
 }
 
@@ -578,11 +579,11 @@ func TestListenForNewConnectionsWithAddProxyMessage(t *testing.T) {
 func TestListenForNewConnectionsWithForwardsUpdatedMessage(t *testing.T) {
 	// Create a mock WebSocket connection
 	mockConn := &mocks.MockWebSocketConn{}
-	
+
 	// Set up expectations for the mock
 	mockConn.On("SetReadDeadline", mock.AnythingOfType("time.Time")).Return(nil)
 	mockConn.On("SetPongHandler", mock.AnythingOfType("func(string) error")).Return()
-	
+
 	// Simulate receiving a forwards_updated message, then an error to exit the loop
 	callCount := 0
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Run(func(args mock.Arguments) {
@@ -603,7 +604,7 @@ func TestListenForNewConnectionsWithForwardsUpdatedMessage(t *testing.T) {
 		}
 	}).Return(nil).Once()
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Return(fmt.Errorf("test error")).Once()
-	
+
 	// Create a client state
 	clientState := &ClientState{
 		Forwards: []common.ForwardConfig{
@@ -614,31 +615,31 @@ func TestListenForNewConnectionsWithForwardsUpdatedMessage(t *testing.T) {
 		},
 		ClientID: "test-client-id",
 	}
-	
+
 	// Create a context that we can cancel
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Run listenForNewConnections in a separate goroutine
 	go func() {
 		listenForNewConnections(ctx, mockConn, "", clientState)
 	}()
-	
+
 	// Give it a moment to start
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Cancel the context to stop the function
 	cancel()
-	
+
 	// Give it a moment to finish
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Verify that the forwards were updated
 	clientState.mu.RLock()
 	assert.Equal(t, 1, len(clientState.Forwards))
 	assert.Equal(t, 8082, clientState.Forwards[0].REMOTE_PORT)
 	assert.Equal(t, "127.0.0.1:3002", clientState.Forwards[0].LOCAL_ADDR)
 	clientState.mu.RUnlock()
-	
+
 	mockConn.AssertExpectations(t)
 }
 
@@ -646,11 +647,11 @@ func TestListenForNewConnectionsWithForwardsUpdatedMessage(t *testing.T) {
 func TestListenForNewConnectionsWithUnmarshalError(t *testing.T) {
 	// Create a mock WebSocket connection
 	mockConn := &mocks.MockWebSocketConn{}
-	
+
 	// Set up expectations for the mock
 	mockConn.On("SetReadDeadline", mock.AnythingOfType("time.Time")).Return(nil)
 	mockConn.On("SetPongHandler", mock.AnythingOfType("func(string) error")).Return()
-	
+
 	// Simulate receiving a message with invalid payload, then an error to exit the loop
 	callCount := 0
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Run(func(args mock.Arguments) {
@@ -666,7 +667,7 @@ func TestListenForNewConnectionsWithUnmarshalError(t *testing.T) {
 		}
 	}).Return(nil).Once()
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Return(fmt.Errorf("test error")).Once()
-	
+
 	// Create a client state
 	clientState := &ClientState{
 		Forwards: []common.ForwardConfig{
@@ -677,24 +678,24 @@ func TestListenForNewConnectionsWithUnmarshalError(t *testing.T) {
 		},
 		ClientID: "test-client-id",
 	}
-	
+
 	// Create a context that we can cancel
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Run listenForNewConnections in a separate goroutine
 	go func() {
 		listenForNewConnections(ctx, mockConn, "", clientState)
 	}()
-	
+
 	// Give it a moment to start
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Cancel the context to stop the function
 	cancel()
-	
+
 	// Give it a moment to finish
 	time.Sleep(10 * time.Millisecond)
-	
+
 	mockConn.AssertExpectations(t)
 }
 
@@ -702,11 +703,11 @@ func TestListenForNewConnectionsWithUnmarshalError(t *testing.T) {
 func TestListenForNewConnectionsWithUnknownMessageType(t *testing.T) {
 	// Create a mock WebSocket connection
 	mockConn := &mocks.MockWebSocketConn{}
-	
+
 	// Set up expectations for the mock
 	mockConn.On("SetReadDeadline", mock.AnythingOfType("time.Time")).Return(nil)
 	mockConn.On("SetPongHandler", mock.AnythingOfType("func(string) error")).Return()
-	
+
 	// Simulate receiving an unknown message type, then an error to exit the loop
 	callCount := 0
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Run(func(args mock.Arguments) {
@@ -721,7 +722,7 @@ func TestListenForNewConnectionsWithUnknownMessageType(t *testing.T) {
 		}
 	}).Return(nil).Once()
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Return(fmt.Errorf("test error")).Once()
-	
+
 	// Create a client state
 	clientState := &ClientState{
 		Forwards: []common.ForwardConfig{
@@ -732,24 +733,24 @@ func TestListenForNewConnectionsWithUnknownMessageType(t *testing.T) {
 		},
 		ClientID: "test-client-id",
 	}
-	
+
 	// Create a context that we can cancel
 	ctx, cancel := context.WithCancel(context.Background())
-	
+
 	// Run listenForNewConnections in a separate goroutine
 	go func() {
 		listenForNewConnections(ctx, mockConn, "", clientState)
 	}()
-	
+
 	// Give it a moment to start
 	time.Sleep(10 * time.Millisecond)
-	
+
 	// Cancel the context to stop the function
 	cancel()
-	
+
 	// Give it a moment to finish
 	time.Sleep(10 * time.Millisecond)
-	
+
 	mockConn.AssertExpectations(t)
 }
 

@@ -413,6 +413,10 @@ func unmarshalPayload(payload interface{}, v interface{}) error {
 
 // handleNewTunnel connects to the local service and establishes a new data WebSocket connection.
 func handleNewTunnel(controlConn WebSocketConn, serverAddr string, state *ClientState, tunnelID string, clientID string, remotePort int) {
+	if controlConn == nil {
+		log.Printf("[%s] controlConn is nil, cannot handle new tunnel.", tunnelID)
+		return
+	}
 	state.mu.RLock()
 	var localAddr string
 	var found bool
