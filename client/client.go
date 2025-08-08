@@ -57,6 +57,8 @@ func Run(args []string) {
 	serverAddr := fs.String("server", "", "Server WebSocket URL (e.g., ws://localhost:8001/proxy_ws)")
 	proxyUser := fs.String("proxy_user", "", "Proxy username for authentication")
 	proxyPasswd := fs.String("proxy_passwd", "", "Proxy password for authentication")
+	localAddr := fs.String("local", "", "Local address to forward to (e.g., localhost:3000)")
+	remotePort := fs.Int("remote", 0, "Remote port to listen on")
 
 	totpSecret := fs.String("totp-secret", "", "TOTP secret key for long-term authentication")
 	fs.Parse(args)
@@ -95,6 +97,11 @@ func Run(args []string) {
 	clientState := &ClientState{
 		Forwards: []common.ForwardConfig{},
 		ClientID: "", // Initialize with empty ID
+	}
+
+	// If local and remote are provided, add them to the forwards list
+	if *localAddr != "" && *remotePort != 0 {
+		clientState.Forwards = append(clientState.Forwards, common.ForwardConfig{LOCAL_ADDR: *localAddr, REMOTE_PORT: *remotePort})
 	}
 
 	// Prompt for the TOTP token if no secret is provided. This is done once.
@@ -169,7 +176,12 @@ func Run(args []string) {
 
 		log.Println("Authentication successful.")
 
-		// Reset state on successful connection and send initial proxy request
+		// Request proxy for each forward config
+		for _, forward := range clientState.Forwards {
+			if err := requestProxy(controlConn, forward.REMOTE_PORT, forward.LOCAL_ADDR, clientState.ClientID); err != nil {
+				log.Printf("Failed to request proxy for %s:%d: %v", forward.LOCAL_ADDR, forward.REMOTE_PORT, err)
+			}
+		}
 
 		// This function blocks until the connection is lost or the context is cancelled.
 		listenForNewConnections(ctx, controlConn, *serverAddr, clientState)
