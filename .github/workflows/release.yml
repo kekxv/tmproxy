@@ -29,6 +29,12 @@ jobs:
       - name: Build for Linux (arm64)
         run: GOOS=linux GOARCH=arm64 go build -o release/tmproxy-linux-arm64 main.go
 
+      - name: Build for Linux (armv6)
+        run: GOOS=linux GOARCH=arm GOARM=6 go build -o release/tmproxy-linux-armv6 main.go
+
+      - name: Build for Linux (armv7)
+        run: GOOS=linux GOARCH=arm GOARM=7 go build -o release/tmproxy-linux-armv7 main.go
+
       - name: Build for Windows (amd64)
         run: GOOS=windows GOARCH=amd64 go build -o release/tmproxy-windows-amd64.exe main.go
 
@@ -67,6 +73,26 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./tmproxy-linux-arm64
           asset_name: tmproxy-linux-arm64
+          asset_content_type: application/octet-stream
+
+      - name: Upload Linux (armv6) Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./tmproxy-linux-armv6
+          asset_name: tmproxy-linux-armv6
+          asset_content_type: application/octet-stream
+
+      - name: Upload Linux (armv7) Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./tmproxy-linux-armv7
+          asset_name: tmproxy-linux-armv7
           asset_content_type: application/octet-stream
 
       - name: Upload Windows (amd64) Asset

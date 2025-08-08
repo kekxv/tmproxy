@@ -1,0 +1,105 @@
+name: Build and Test
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+    branches:
+      - main
+      - master
+
+jobs:
+  test:
+    name: Run tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-mod-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-mod-
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.5'
+
+      - name: Get dependencies
+        run: go mod download
+
+      - name: Run tests
+        run: |
+          go test ./... -v -timeout 2m
+
+  build:
+    name: Build binaries (multi-arch)
+    needs: test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+            name: linux-amd64
+          - goos: linux
+            goarch: arm64
+            name: linux-arm64
+          - goos: linux
+            goarch: arm
+            goarm: '7'
+            name: linux-armv7
+          - goos: windows
+            goarch: amd64
+            name: windows-amd64
+          - goos: darwin
+            goarch: amd64
+            name: darwin-amd64
+          - goos: darwin
+            goarch: arm64
+            name: darwin-arm64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.24.5'
+
+      - name: Get dependencies
+        run: go mod download
+
+      - name: Build
+        run: |
+          set -e
+          # 如果需要为 arm 设置 GOARM
+          if [ -n "${{ matrix.goarm }}" ]; then
+            export GOARM=${{ matrix.goarm }}
+          fi
+          mkdir -p release
+          EXT=""
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            EXT=".exe"
+          fi
+          echo "Building for ${matrix_goos}-${matrix_goarch}${matrix_goarm:+-goarm${matrix_goarm}}"
+          CGO_ENABLED=0 GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} go build -ldflags="-s -w" -o release/tmproxy-${{ matrix.name }}${EXT} main.go
+
+      - name: List artifacts
+        run: ls -l release || true
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tmproxy-${{ matrix.name }}
+          path: release/tmproxy-${{ matrix.name }}*
+          retention-days: 3
