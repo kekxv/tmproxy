@@ -128,3 +128,18 @@ jobs:
           asset_path: ./release/tmproxy-darwin-arm64
           asset_name: tmproxy-darwin-arm64
           asset_content_type: application/octet-stream
+
+      - run: mv release clients
+      - uses: montudor/action-zip@v1
+        with:
+          args: zip -qq -r clients.zip clients
+
+      - name: Upload clients Asset
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./clients.zip
+          asset_name: clients.zip
+          asset_content_type: application/octet-stream
