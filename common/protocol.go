@@ -10,8 +10,10 @@ type Message struct {
 // AuthRequest is the payload for an authentication request from the client.
 // It contains the TOTP code required for verification.
 type AuthRequest struct {
-	Token    string `json:"token"`
-	ClientID string `json:"client_id"`
+	Token       string `json:"token"`
+	ClientID    string `json:"client_id"`
+	ProxyUser   string `json:"proxy_user,omitempty"`
+	ProxyPasswd string `json:"proxy_passwd,omitempty"`
 }
 
 // AuthResponse is the payload for an authentication response from the server.
@@ -77,4 +79,34 @@ type DelForwardResponse struct {
 type DisconnectResponse struct {
 	Success bool   `json:"success"`
 	Message string `json:"message"`
+}
+
+// HttpRequest is a message from the server to the client, asking it to perform an HTTP request.
+type HttpRequest struct {
+	RequestID string              `json:"request_id"`
+	Method    string              `json:"method"`
+	URL       string              `json:"url"`
+	Headers   map[string][]string `json:"headers"`
+	Body      []byte              `json:"body"`
+}
+
+// HttpResponse is a message from the client to the server, containing the result of an HTTP request.
+type HttpResponse struct {
+	RequestID  string              `json:"request_id"`
+	StatusCode int                 `json:"status_code"`
+	Headers    map[string][]string `json:"headers"`
+	Body       []byte              `json:"body"`
+}
+
+// ConnectRequest is a message from the server to the client, asking it to open a TCP connection for a CONNECT tunnel.
+type ConnectRequest struct {
+	TunnelID string `json:"tunnel_id"`
+	Host     string `json:"host"`
+}
+
+// ConnectResponse is a message from the client to the server, indicating if the CONNECT dial failed.
+type ConnectResponse struct {
+	TunnelID string `json:"tunnel_id"`
+	Success  bool   `json:"success"`
+	Error    string `json:"error,omitempty"`
 }

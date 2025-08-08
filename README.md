@@ -16,6 +16,71 @@ tmproxy is a lightweight, secure, and easy-to-distribute reverse proxy (or intra
 *   **Secure & Robust**: Includes connection limits, authentication timeouts, and defense mechanisms against malicious input.
 *   **WSS/HTTPS Support**: Supports secure WebSocket (WSS) and HTTPS connections when TLS certificates are provided.
 
+## 🔀 HTTP/HTTPS Proxy Mode
+
+tmproxy can also function as a secure, authenticated HTTP/HTTPS proxy. This allows you to route traffic from any application that supports HTTP proxies through a specific `tmproxy` client, effectively giving you a secure entry point into that client's network.
+
+### How It Works
+
+1.  **Configuration**: You define a list of `PROXY_USERS` with usernames and passwords in the server's `config.json`.
+2.  **Authentication**: When a proxy request is made (e.g., via `curl`), the server authenticates the user against the `PROXY_USERS` list.
+3.  **Client Association**: A `tmproxy` client must connect to the server using the *same username* to associate itself with that proxy user.
+4.  **Request Forwarding**: The server forwards the HTTP/HTTPS request to the associated client via the secure WebSocket tunnel.
+5.  **Execution & Response**: The client executes the request in its local network and sends the response back to the server, which then returns it to the original requester.
+
+### Configuration
+
+To enable the proxy, add a `PROXY_USERS` array to your `config.json`:
+
+```json
+{
+  ...
+  "PROXY_USERS": [
+    {
+      "username": "user1",
+      "password": "a_very_strong_password"
+    },
+    {
+      "username": "user2",
+      "password": "another_secret_password"
+    }
+  ],
+  ...
+}
+```
+
+**Important**: When `PROXY_USERS` is configured, the server will operate in a dual mode:
+*   Requests with a `Proxy-Authorization` header will be treated as proxy requests.
+*   All other requests will be served the standard web interface.
+
+### Running the Client for Proxy Mode
+
+The client must connect with a username that matches one in the `PROXY_USERS` list. Use the `--proxy_user` and `--proxy_passwd` flags:
+
+```bash
+./tmproxy client --server ws://your-server-ip:8001/proxy_ws --proxy_user user1 --proxy_passwd a_very_strong_password
+```
+
+This command connects the client and tells the server, "I am the endpoint for all proxy requests authenticated as `user1`."
+
+### Using the Proxy
+
+Once the client is connected, you can use the server as a standard HTTP/HTTPS proxy:
+
+```bash
+# Example for HTTP
+curl -v -x http://user1:a_very_strong_password@your-server-ip:8001 http://httpbin.org/get
+
+# Example for HTTPS (CONNECT tunnel)
+curl -v -x http://user1:a_very_strong_password@your-server-ip:8001 https://httpbin.org/ip
+```
+
+### ⚠️ Security Considerations
+
+*   **Enable TLS**: HTTP Basic Authentication is **not encrypted**. For production use, it is **highly recommended** to run the server with TLS enabled (`TLS_CERT_FILE` and `TLS_KEY_FILE`) to protect your proxy credentials.
+*   **Strong Passwords**: Use strong, unique passwords for your proxy users.
+*   **Log Verbosity**: Be aware that request URLs are logged. In a production environment, consider adjusting log levels or formats to avoid logging sensitive data.
+
 ## 📦 Getting Started
 
 ### Prerequisites

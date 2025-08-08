@@ -29,13 +29,17 @@ var frontendFS embed.FS
 type Server struct {
 	config               *common.Config
 	upgrader             websocket.Upgrader
-	clients              map[string]*ClientInfo     // Map of client ID to ClientInfo
-	connToClientID       map[*websocket.Conn]string // Reverse map for quick lookup
+	clients              map[string]*ClientInfo               // Map of client ID to ClientInfo
+	connToClientID       map[*websocket.Conn]string           // Reverse map for quick lookup
 	activeTunnels        map[string]chan net.Conn
 	mu                   sync.Mutex
 	activeTCPConnections map[string]*TCPConnectionInfo
 	adminSessions        map[string]bool
-	disconnectedClients  map[string]*DisconnectedClientInfo // Map of client ID to DisconnectedClientInfo
+	disconnectedClients  map[string]*DisconnectedClientInfo   // Map of client ID to DisconnectedClientInfo
+	proxyUsers           map[string]string                    // Map of proxy user to client ID
+	httpProxyUsers       map[string]string                    // Map of http proxy username to password
+	pendingRequests      map[string]chan common.HttpResponse // Map of request ID to response channel
+	pendingConnects      map[string]chan common.ConnectResponse // Map of tunnel ID to connect response channel
 }
 
 // DisconnectedClientInfo stores information about a disconnected client for re-connection purposes.
@@ -56,6 +60,7 @@ type ClientInfo struct {
 	done        chan struct{}          // Channel to signal client disconnection
 	mu          sync.Mutex             // Mutex to protect access to Listeners and Forwards
 	cleanupOnce sync.Once              // Ensures cleanup is performed only once
+	ProxyUser   string                 `json:"proxy_user,omitempty"`
 }
 
 // TCPConnectionInfo stores information about an active TCP connection.
@@ -71,6 +76,11 @@ type TCPConnectionInfo struct {
 
 // NewServer creates and initializes a new server instance.
 func NewServer(config *common.Config) *Server {
+	httpProxyUsers := make(map[string]string)
+	for _, user := range config.PROXY_USERS {
+		httpProxyUsers[user.Username] = user.Password
+	}
+
 	return &Server{
 		config:               config,
 		clients:              make(map[string]*ClientInfo),
@@ -79,6 +89,10 @@ func NewServer(config *common.Config) *Server {
 		activeTCPConnections: make(map[string]*TCPConnectionInfo),
 		adminSessions:        make(map[string]bool),
 		disconnectedClients:  make(map[string]*DisconnectedClientInfo),
+		proxyUsers:           make(map[string]string),
+		httpProxyUsers:       httpProxyUsers,
+		pendingRequests:      make(map[string]chan common.HttpResponse),
+		pendingConnects:      make(map[string]chan common.ConnectResponse),
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
@@ -96,34 +110,49 @@ func Run(args []string) {
 
 	server := NewServer(config)
 
+	// Create a new ServeMux for the main server
+	mainMux := http.NewServeMux()
+
 	// Serve static files from the embedded filesystem
 	staticFS, _ := fs.Sub(frontendFS, "frontend")
-	http.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
+	mainMux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticFS))))
 
-	http.HandleFunc("/", server.handleHomePage)
-	http.HandleFunc("/client", server.handleClientDownload)
-	http.HandleFunc(config.WEBSOCKET_PATH, server.handleWebSocket)
+	mainMux.HandleFunc("/", server.handleHomePage)
+	mainMux.HandleFunc("/client", server.handleClientDownload)
+	mainMux.HandleFunc(config.WEBSOCKET_PATH, server.handleWebSocket)
 
-	http.HandleFunc("/admin/", server.requireAdminAuth(server.handleAdminDashboard))
-	http.HandleFunc("/admin/login", server.handleAdminLoginPage)
-	http.HandleFunc("/api/admin/login", server.handleAdminLogin)
-	http.HandleFunc("/api/admin/clients", server.requireAdminAuth(server.handleApiClients))
-	http.HandleFunc("/api/admin/connections", server.requireAdminAuth(server.handleApiConnections))
-	http.HandleFunc("/api/admin/disconnect", server.requireAdminAuth(server.handleApiDisconnect))
-	http.HandleFunc("/api/admin/forwards", server.requireAdminAuth(server.handleAddForward))
-	http.HandleFunc("/api/admin/delete_forward", server.requireAdminAuth(server.handleApiDeleteForward))
+	mainMux.HandleFunc("/admin/", server.requireAdminAuth(server.handleAdminDashboard))
+	mainMux.HandleFunc("/admin/login", server.handleAdminLoginPage)
+	mainMux.HandleFunc("/api/admin/login", server.handleAdminLogin)
+	mainMux.HandleFunc("/api/admin/clients", server.requireAdminAuth(server.handleApiClients))
+	mainMux.HandleFunc("/api/admin/connections", server.requireAdminAuth(server.handleApiConnections))
+	mainMux.HandleFunc("/api/admin/disconnect", server.requireAdminAuth(server.handleApiDisconnect))
+	mainMux.HandleFunc("/api/admin/forwards", server.requireAdminAuth(server.handleAddForward))
+	mainMux.HandleFunc("/api/admin/delete_forward", server.requireAdminAuth(server.handleApiDeleteForward))
 
 	// Start a goroutine to clean up disconnected clients
 	go server.cleanupDisconnectedClients()
 
+	// The main handler that decides whether to proxy or serve content
+	mainHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// If the request is a CONNECT request or has a Proxy-Authorization header,
+		// and proxy users are configured, handle it as a proxy request.
+		if (r.Method == http.MethodConnect || r.Header.Get("Proxy-Authorization") != "") && len(server.config.PROXY_USERS) > 0 {
+			server.handleProxy(w, r)
+		} else {
+			// Otherwise, serve the admin/informational content.
+			mainMux.ServeHTTP(w, r)
+		}
+	})
+
 	log.Printf("Server starting on %s...", config.LISTEN_ADDR)
 	if config.TLS_CERT_FILE != "" && config.TLS_KEY_FILE != "" {
 		log.Printf("Using TLS certificates: %s and %s", config.TLS_CERT_FILE, config.TLS_KEY_FILE)
-		if err := http.ListenAndServeTLS(config.LISTEN_ADDR, config.TLS_CERT_FILE, config.TLS_KEY_FILE, nil); err != nil {
+		if err := http.ListenAndServeTLS(config.LISTEN_ADDR, config.TLS_CERT_FILE, config.TLS_KEY_FILE, mainHandler); err != nil {
 			log.Fatalf("Server failed to start with TLS: %v", err)
 		}
 	} else {
-		if err := http.ListenAndServe(config.LISTEN_ADDR, nil); err != nil {
+		if err := http.ListenAndServe(config.LISTEN_ADDR, mainHandler); err != nil {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}
@@ -136,6 +165,9 @@ func (s *Server) cleanupDisconnectedClients() {
 		for clientID, info := range s.disconnectedClients {
 			if time.Since(info.DisconnectedAt) > 30*time.Second {
 				log.Printf("Cleaning up expired disconnected client: %s", clientID)
+				if info.ClientInfo.ProxyUser != "" {
+					delete(s.proxyUsers, info.ClientInfo.ProxyUser)
+				}
 				delete(s.disconnectedClients, clientID)
 			}
 		}
@@ -257,6 +289,9 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 				}
 			} else {
 				// Client ID expired, remove it
+				if disconnectedInfo.ClientInfo.ProxyUser != "" {
+					delete(s.proxyUsers, disconnectedInfo.ClientInfo.ProxyUser)
+				}
 				delete(s.disconnectedClients, authReq.ClientID)
 				log.Printf("Client ID expired: %s. Assigning new ID.", authReq.ClientID)
 			}
@@ -274,6 +309,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			Forwards:    []common.ForwardConfig{},
 			sendChan:    make(chan common.Message, 100), // Buffered channel for sending messages
 			done:        make(chan struct{}),            // Initialize done channel
+			ProxyUser:   authReq.ProxyUser,
 		}
 		log.Printf("New client connected: %s (ID: %s)", conn.RemoteAddr(), clientInfo.ID)
 	}
@@ -286,6 +322,9 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 
 	s.clients[clientInfo.ID] = clientInfo
 	s.connToClientID[conn] = clientInfo.ID
+	if clientInfo.ProxyUser != "" {
+		s.proxyUsers[clientInfo.ProxyUser] = clientInfo.ID
+	}
 
 	// Send AuthResponse with the assigned ClientID
 	clientInfo.sendChan <- common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: true, ClientID: clientInfo.ID, Forwards: clientInfo.Forwards}}
@@ -361,6 +400,28 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 			delete(s.activeTunnels, failedConn.TunnelID)
 			delete(s.activeTCPConnections, failedConn.TunnelID)
 			s.mu.Unlock() // Release lock
+		case "http_response":
+			var resp common.HttpResponse
+			payloadBytes, _ := json.Marshal(msg.Payload)
+			json.Unmarshal(payloadBytes, &resp)
+
+			s.mu.Lock()
+			if respChan, ok := s.pendingRequests[resp.RequestID]; ok {
+				respChan <- resp
+				delete(s.pendingRequests, resp.RequestID)
+			}
+			s.mu.Unlock()
+		case "connect_response":
+			var resp common.ConnectResponse
+			payloadBytes, _ := json.Marshal(msg.Payload)
+			json.Unmarshal(payloadBytes, &resp)
+
+			s.mu.Lock()
+			if respChan, ok := s.pendingConnects[resp.TunnelID]; ok {
+				respChan <- resp
+				delete(s.pendingConnects, resp.TunnelID)
+			}
+			s.mu.Unlock()
 		}
 	}
 
@@ -381,6 +442,10 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 	s.disconnectedClients[clientInfo.ID] = &DisconnectedClientInfo{
 		ClientInfo:     clientInfo,
 		DisconnectedAt: time.Now(),
+	}
+	if clientInfo.ProxyUser != "" {
+		delete(s.proxyUsers, clientInfo.ProxyUser)
+		log.Printf("Proxy user '%s' freed up due to disconnect.", clientInfo.ProxyUser)
 	}
 	delete(s.clients, clientInfo.ID)
 	delete(s.connToClientID, conn)
@@ -407,6 +472,18 @@ func (s *Server) authenticateClient(conn *websocket.Conn) (bool, common.AuthRequ
 	var authReq common.AuthRequest
 	payloadBytes, _ := json.Marshal(msg.Payload)
 	json.Unmarshal(payloadBytes, &authReq)
+
+	if authReq.ProxyUser != "" {
+		// This is a proxy user, check for conflicts
+		if existingClientID, ok := s.proxyUsers[authReq.ProxyUser]; ok && existingClientID != authReq.ClientID {
+			// Proxy user exists and is not the same client trying to reconnect
+			log.Printf("Proxy user '%s' already in use by client %s. Rejecting new connection from %s.", authReq.ProxyUser, existingClientID, conn.RemoteAddr())
+			conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Proxy user already in use"}})
+			return false, authReq
+		}
+		// If the client is reconnecting, the user is already in the map, which is fine.
+		// If it's a new client, we will add the user to the map later in handleControlChannel.
+	}
 
 	valid := totp.Validate(authReq.Token, s.config.TOTP_SECRET_KEY)
 	if !valid {

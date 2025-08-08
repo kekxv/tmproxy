@@ -16,6 +16,71 @@ tmproxy 是一个轻量级、安全且易于分发的反向代理（或内网穿
 *   **安全加固**: 内置连接数限制、认证超时以及对恶意输入的防御机制。
 *   **WSS/HTTPS 支持**: 当提供 TLS 证书时，支持安全的 WebSocket (WSS) 和 HTTPS 连接。
 
+## 🔀 HTTP/HTTPS 代理模式
+
+tmproxy 还可以作为一个安全的、需要认证的 HTTP/HTTPS 代理服务器。该功能允许您将任何支持 HTTP 代理的应用程序流量，通过一个指定的 `tmproxy` 客户端进行路由，从而为您提供一个进入该客户端所在网络的安全入口。
+
+### 工作原理
+
+1.  **配置**: 您需要在服务器的 `config.json` 文件中定义一个 `PROXY_USERS` 列表，包含用户名和密码。
+2.  **认证**: 当外部应用（如 `curl`）发起代理请求时，服务器会根据 `PROXY_USERS` 列表对用户进行认证。
+3.  **客户端关联**: 一个 `tmproxy` 客户端必须使用**相同的用户名**连接到服务器，以将自身与该代理用户关联起来。
+4.  **请求转发**: 服务器通过安全的 WebSocket 隧道，将原始的 HTTP/HTTPS 请求转发到已关联的客户端。
+5.  **执行与响应**: 客户端在其本地网络中执行该请求，并将响应发回给服务器，服务器最终将响应返回给最初的请求者。
+
+### 配置
+
+要启用代理功能，请在您的 `config.json` 中添加一个 `PROXY_USERS` 数组：
+
+```json
+{
+  ...
+  "PROXY_USERS": [
+    {
+      "username": "user1",
+      "password": "一个非常健壮的密码"
+    },
+    {
+      "username": "user2",
+      "password": "另一个保密的密码"
+    }
+  ],
+  ...
+}
+```
+
+**重要提示**: 当 `PROXY_USERS` 被配置后，服务器将以双重模式运行：
+*   包含 `Proxy-Authorization` 头部的请求将被视为代理请求。
+*   所有其他请求将正常访问标准的 Web 管理界面。
+
+### 运行客户端以启用代理模式
+
+客户端必须使用与 `PROXY_USERS` 列表中匹配的用户名进行连接。请使用 `--proxy_user` 和 `--proxy_passwd` 标志：
+
+```bash
+./tmproxy client --server ws://your-server-ip:8001/proxy_ws --proxy_user user1 --proxy_passwd 一个非常健壮的密码
+```
+
+此命令会连接客户端，并告知服务器：“所有以 `user1` 用户名认证的代理请求都由我来处理。”
+
+### 使用代理
+
+一旦客户端连接成功，您就可以将服务器作为一个标准的 HTTP/HTTPS 代理来使用：
+
+```bash
+# HTTP 示例
+curl -v -x http://user1:一个非常健壮的密码@your-server-ip:8001 http://httpbin.org/get
+
+# HTTPS (CONNECT 隧道) 示例
+curl -v -x http://user1:一个非常健壮的密码@your-server-ip:8001 https://httpbin.org/ip
+```
+
+### ⚠️ 安全注意事项
+
+*   **启用 TLS**: HTTP Basic 认证本身是**未加密**的。对于生产环境，**强烈建议**您为服务器启用 TLS（通过配置 `TLS_CERT_FILE` 和 `TLS_KEY_FILE`），以保护您的代理凭证。
+*   **使用强密码**: 请为您的代理用户设置健壮且唯一的密码。
+*   **日志详细程度**: 请注意，请求的 URL 会被记录在日志中。在生产环境中，您可能需要调整日志级别或格式，以避免记录敏感数据。
+
 ## 📦 快速开始
 
 ### 前提条件

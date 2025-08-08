@@ -14,6 +14,11 @@ type ForwardConfig struct {
 	LOCAL_ADDR  string `json:"LOCAL_ADDR"`
 }
 
+type ProxyUser struct {
+	Username string `json:"username"`
+	Password string `json:"password"`
+}
+
 // Config defines the structure for the server configuration.
 // It includes settings for the listener, proxying, and security.
 // Note: Field names are in uppercase to match the JSON file format.
@@ -22,6 +27,7 @@ type Config struct {
 	MAX_CLIENTS     int             `json:"MAX_CLIENTS"`
 	WEBSOCKET_PATH  string          `json:"WEBSOCKET_PATH"`
 	FORWARD         []ForwardConfig `json:"FORWARD"`
+	PROXY_USERS     []ProxyUser     `json:"PROXY_USERS,omitempty"`
 	TOTP_SECRET_KEY string          `json:"TOTP_SECRET_KEY"`
 	TLS_CERT_FILE   string          `json:"TLS_CERT_FILE,omitempty"`
 	TLS_KEY_FILE    string          `json:"TLS_KEY_FILE,omitempty"`

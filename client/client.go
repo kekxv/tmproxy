@@ -54,6 +54,8 @@ func Run(args []string) {
 	// Define and parse command-line flags.
 	fs := flag.NewFlagSet("client", flag.ExitOnError)
 	serverAddr := fs.String("server", "", "Server WebSocket URL (e.g., ws://localhost:8001/proxy_ws)")
+	proxyUser := fs.String("proxy_user", "", "Proxy username for authentication")
+	proxyPasswd := fs.String("proxy_passwd", "", "Proxy password for authentication")
 	
 	totpSecret := fs.String("totp-secret", "", "TOTP secret key for long-term authentication")
 	fs.Parse(args)
@@ -114,7 +116,7 @@ func Run(args []string) {
 
 		log.Println("Connected to server. Authenticating...")
 		// Pass clientState.ClientID to authenticate and update it from the response
-		newClientID, err := authenticate(controlConn, token, *totpSecret, clientState.ClientID, clientState)
+		newClientID, err := authenticate(controlConn, token, *totpSecret, clientState.ClientID, *proxyUser, *proxyPasswd, clientState)
 		if err != nil {
 			log.Printf("Authentication failed: %v", err)
 			// If the server explicitly rejected the authentication (e.g., bad token), exit.
@@ -167,7 +169,7 @@ func Run(args []string) {
 }
 
 // authenticate sends the TOTP token and ClientID to the server and waits for a successful response.
-func authenticate(conn WebSocketConn, token, totpSecret, clientID string, state *ClientState) (string, error) {
+func authenticate(conn WebSocketConn, token, totpSecret, clientID, proxyUser, proxyPasswd string, state *ClientState) (string, error) {
 	// If a TOTP secret is provided, generate the token from it.
 	if totpSecret != "" {
 		generatedToken, err := common.GenerateTOTP(totpSecret)
@@ -178,7 +180,7 @@ func authenticate(conn WebSocketConn, token, totpSecret, clientID string, state 
 	}
 
 	// Send authentication request.
-	req := common.Message{Type: "auth_request", Payload: common.AuthRequest{Token: token, ClientID: clientID}}
+	req := common.Message{Type: "auth_request", Payload: common.AuthRequest{Token: token, ClientID: clientID, ProxyUser: proxyUser, ProxyPasswd: proxyPasswd}}
 	if err := conn.WriteJSON(req); err != nil {
 		return "", fmt.Errorf("failed to send auth request: %w", err)
 	}
@@ -358,6 +360,22 @@ func listenForNewConnections(ctx context.Context, controlConn WebSocketConn, ser
 				state.Forwards = updatedForwards
 				state.mu.Unlock()
 				log.Printf("Client received updated forwards from server: %+v", updatedForwards)
+
+			case "http_request":
+				var req common.HttpRequest
+				if err := unmarshalPayload(msg.Payload, &req); err != nil {
+					log.Printf("Error unmarshalling http_request payload: %v", err)
+					continue
+				}
+				go handleHttpRequest(controlConn, &req)
+
+			case "connect_request":
+				var req common.ConnectRequest
+				if err := unmarshalPayload(msg.Payload, &req); err != nil {
+					log.Printf("Error unmarshalling connect_request payload: %v", err)
+					continue
+				}
+				go handleConnectRequest(controlConn, serverAddr, state.ClientID, &req)
 
 			default:
 				log.Printf("Received unknown message type: %s", msg.Type)
