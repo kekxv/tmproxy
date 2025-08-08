@@ -65,7 +65,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./tmproxy-linux-amd64
+          asset_path: ./release/tmproxy-linux-amd64
           asset_name: tmproxy-linux-amd64
           asset_content_type: application/octet-stream
 
@@ -75,7 +75,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./tmproxy-linux-arm64
+          asset_path: ./release/tmproxy-linux-arm64
           asset_name: tmproxy-linux-arm64
           asset_content_type: application/octet-stream
 
@@ -85,7 +85,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./tmproxy-linux-armv6
+          asset_path: ./release/tmproxy-linux-armv6
           asset_name: tmproxy-linux-armv6
           asset_content_type: application/octet-stream
 
@@ -95,7 +95,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./tmproxy-linux-armv7
+          asset_path: ./release/tmproxy-linux-armv7
           asset_name: tmproxy-linux-armv7
           asset_content_type: application/octet-stream
 
@@ -105,7 +105,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./tmproxy-windows-amd64.exe
+          asset_path: ./release/tmproxy-windows-amd64.exe
           asset_name: tmproxy-windows-amd64.exe
           asset_content_type: application/octet-stream
 
@@ -115,7 +115,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./tmproxy-darwin-amd64
+          asset_path: ./release/tmproxy-darwin-amd64
           asset_name: tmproxy-darwin-amd64
           asset_content_type: application/octet-stream
 
@@ -125,6 +125,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./tmproxy-darwin-arm64
+          asset_path: ./release/tmproxy-darwin-arm64
           asset_name: tmproxy-darwin-arm64
           asset_content_type: application/octet-stream
