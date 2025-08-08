@@ -9,32 +9,39 @@
 <body>
     <div class="container">
         <h1>tmproxy Server</h1>
-        <p>Your proxy server is running. Use the client to connect.</p>
-        <h2>Download Client</h2>
+        <p>代理服务器正在运行。使用客户端进行连接。</p>
+        <p>Proxy server is running. Use the client to connect.</p>
+        
+        <h2>下载客户端 (Download Client)</h2>
+        
         <p><b>Linux & macOS:</b></p>
         <div class="code-block">
             <pre id="linux-mac-cmd">curl -o tmproxy "{{.ServerHTTPURL}}/client?os=$(uname -s)&arch=$(uname -m)" && chmod +x ./tmproxy</pre>
             <button class="copy-btn" onclick="copyToClipboard('linux-mac-cmd', this)">Copy</button>
             <span class="copy-feedback">Copied!</span>
         </div>
+        
         <p><b>Windows (PowerShell):</b></p>
         <div class="code-block">
             <pre id="windows-cmd">Invoke-WebRequest -Uri "{{.ServerHTTPURL}}/client?os=windows&arch=amd64" -OutFile tmproxy.exe</pre>
             <button class="copy-btn" onclick="copyToClipboard('windows-cmd', this)">Copy</button>
             <span class="copy-feedback">Copied!</span>
         </div>
+        
         {{if .ProxyUsers}}
-        <h2>Usage Options</h2>
+        <h2>使用选项 (Usage Options)</h2>
+        <p>此服务器配置为 HTTP/HTTPS 代理模式。您可以连接客户端以转发端口或作为代理端点。</p>
         <p>This server is configured for HTTP/HTTPS Proxy Mode. You can connect a client to either forward ports or to serve as a proxy endpoint.</p>
 
-        <p><b>1. Forwarding Mode Usage</b></p>
+        <p><b>1. 转发模式使用方法 (Forwarding Mode Usage)</b></p>
         <div class="code-block">
             <pre id="usage-cmd-forward">./tmproxy client --server {{.ServerWsURL}} --local localhost:3000 --remote 8080</pre>
             <button class="copy-btn" onclick="copyToClipboard('usage-cmd-forward', this)">Copy</button>
             <span class="copy-feedback">Copied!</span>
         </div>
 
-        <p><b>2. Proxy Mode Usage</b></p>
+        <p><b>2. 代理模式使用方法 (Proxy Mode Usage)</b></p>
+        <p>连接客户端以处理特定用户的代理请求。请选择以下配置的用户之一：</p>
         <p>Connect a client to handle proxy requests for a specific user. Choose one of the configured users below:</p>
         {{range .ProxyUsers}}
         <div class="code-block">
@@ -45,14 +52,45 @@
         {{end}}
 
         {{else}}
-        <h2>Usage</h2>
-        <p><b>Forwarding Mode</b></p>
+        <h2>使用方法 (Usage)</h2>
+        <p><b>转发模式 (Forwarding Mode)</b></p>
         <div class="code-block">
             <pre id="usage-cmd">./tmproxy client --server {{.ServerWsURL}} --local localhost:3000 --remote 8080</pre>
             <button class="copy-btn" onclick="copyToClipboard('usage-cmd', this)">Copy</button>
             <span class="copy-feedback">Copied!</span>
         </div>
         {{end}}
+        
+        <h2>客户端配置示例 (Client Configuration Example)</h2>
+        <p>您可以创建一个<code>config.json</code>文件来存储客户端配置，而无需在命令行中输入所有参数。</p>
+        <p>You can create a <code>config.json</code> file to store client configuration instead of entering all parameters on the command line.</p>
+        
+        <h3>基础配置 (Basic Configuration)</h3>
+        <div class="code-block">
+            <pre>{
+  "SERVER_ADDR": "ws://your-server-ip:8001/proxy_ws",
+  "TOTP_SECRET_KEY": "YOUR_TOTP_SECRET_KEY"
+}</pre>
+        </div>
+        
+        <h3>代理模式配置 (Proxy Mode Configuration)</h3>
+        <div class="code-block">
+            <pre>{
+  "SERVER_ADDR": "ws://your-server-ip:8001/proxy_ws",
+  "PROXY_USER": "user1",
+  "PROXY_PASSWD": "a_very_strong_password",
+  "TOTP_SECRET_KEY": "YOUR_TOTP_SECRET_KEY"
+}</pre>
+        </div>
+        
+        <p>将配置文件保存为<code>config.json</code>，然后只需运行：</p>
+        <p>Save the configuration file as <code>config.json</code>, then simply run:</p>
+        <div class="code-block">
+            <pre>./tmproxy client</pre>
+        </div>
+        
+        <p><b>注意：</b>如果配置文件中没有包含<code>TOTP_SECRET_KEY</code>字段，客户端启动时会提示您输入6位验证码进行登录。</p>
+        <p><b>Note:</b> If the <code>TOTP_SECRET_KEY</code> field is not included in the configuration file, the client will prompt you to enter a 6-digit verification code at startup.</p>
     </div>
     <script src="/static/script.js"></script>
 </body>

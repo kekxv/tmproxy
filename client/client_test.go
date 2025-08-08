@@ -109,7 +109,7 @@ func TestAuthenticateSuccess(t *testing.T) {
 
 	// Test the authenticate function
 	clientState := &ClientState{}
-	clientID, err := authenticate(mockConn, "123456", "", "", clientState)
+	clientID, err := authenticate(mockConn, "123456", "", "", "", "", clientState)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "test-client-id", clientID)
@@ -136,7 +136,7 @@ func TestAuthenticateWithTOTPSecret(t *testing.T) {
 
 	// Test the authenticate function with a valid TOTP secret
 	clientState := &ClientState{}
-	clientID, err := authenticate(mockConn, "", "JBSWY3DPEHPK3PXP", "", clientState)
+	clientID, err := authenticate(mockConn, "", "JBSWY3DPEHPK3PXP", "", "", "", clientState)
 
 	assert.NoError(t, err)
 	assert.Equal(t, "test-client-id", clientID)
@@ -147,7 +147,7 @@ func TestAuthenticateWithTOTPSecret(t *testing.T) {
 func TestAuthenticateWithInvalidTOTPSecret(t *testing.T) {
 	// Test the authenticate function with an invalid TOTP secret
 	clientState := &ClientState{}
-	_, err := authenticate(nil, "", "INVALID_SECRET", "", clientState)
+	_, err := authenticate(nil, "", "INVALID_SECRET", "", "", "", clientState)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to generate TOTP token from secret")
@@ -171,7 +171,7 @@ func TestAuthenticateFailure(t *testing.T) {
 
 	// Test the authenticate function
 	clientState := &ClientState{}
-	_, err := authenticate(mockConn, "123456", "", "", clientState)
+	_, err := authenticate(mockConn, "123456", "", "", "", "", clientState)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "server rejected authentication")
@@ -188,7 +188,7 @@ func TestAuthenticateWriteJSONError(t *testing.T) {
 
 	// Test the authenticate function
 	clientState := &ClientState{}
-	_, err := authenticate(mockConn, "123456", "", "", clientState)
+	_, err := authenticate(mockConn, "123456", "", "", "", "", clientState)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to send auth request")
@@ -206,7 +206,7 @@ func TestAuthenticateReadJSONError(t *testing.T) {
 
 	// Test the authenticate function
 	clientState := &ClientState{}
-	_, err := authenticate(mockConn, "123456", "", "", clientState)
+	_, err := authenticate(mockConn, "123456", "", "", "", "", clientState)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read auth response")
@@ -227,7 +227,7 @@ func TestAuthenticateUnexpectedMessageType(t *testing.T) {
 
 	// Test the authenticate function
 	clientState := &ClientState{}
-	_, err := authenticate(mockConn, "123456", "", "", clientState)
+	_, err := authenticate(mockConn, "123456", "", "", "", "", clientState)
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected message type")
