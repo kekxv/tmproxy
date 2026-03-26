@@ -1,6 +1,7 @@
 # tmproxy: 轻量级反向代理工具
 
-![Go-Proxy Logo](https://raw.githubusercontent.com/your-username/tmproxy/main/docs/logo.png) <!-- 如果您添加了Logo，请替换此占位符 -->
+[![Build and Test](https://github.com/kekxv/tmproxy/actions/workflows/build.yml/badge.svg)](https://github.com/kekxv/tmproxy/actions/workflows/build.yml)
+[![Release](https://github.com/kekxv/tmproxy/actions/workflows/release.yml/badge.svg)](https://github.com/kekxv/tmproxy/actions/workflows/release.yml)
 
 ## 🚀 项目概述
 
@@ -10,10 +11,11 @@ tmproxy 是一个轻量级、安全且易于分发的反向代理（或内网穿
 
 *   **单文件解决方案**: 客户端和服务器端逻辑编译到单个 Go 二进制文件中。
 *   **动态 TOTP 认证**: 使用基于时间的一次性密码（TOTP）进行安全认证，降低密钥泄露风险。
+*   **安全的密码哈希**: 管理员密码使用 bcrypt 哈希存储，提高安全性。
 *   **自动配置生成**: 服务器首次启动时，自动生成包含随机 TOTP 密钥的 `config.json` 配置文件。
 *   **Web 引导页面**: 服务器提供一个简单的 HTTP/S 页面，包含客户端使用说明和动态下载命令。
 *   **跨平台支持**: 得益于 Go 语言，可轻松交叉编译以支持 Linux, Windows, macOS 等主流操作系统。
-*   **安全加固**: 内置连接数限制、认证超时以及对恶意输入的防御机制。
+*   **安全加固**: 内置连接数限制、认证超时、WebSocket Origin 验证以及对恶意输入的防御机制。
 *   **WSS/HTTPS 支持**: 当提供 TLS 证书时，支持安全的 WebSocket (WSS) 和 HTTPS 连接。
 
 ## 🔀 HTTP/HTTPS 代理模式
@@ -79,7 +81,29 @@ curl -v -x http://user1:一个非常健壮的密码@your-server-ip:8001 https://
 
 *   **启用 TLS**: HTTP Basic 认证本身是**未加密**的。对于生产环境，**强烈建议**您为服务器启用 TLS（通过配置 `TLS_CERT_FILE` 和 `TLS_KEY_FILE`），以保护您的代理凭证。
 *   **使用强密码**: 请为您的代理用户设置健壮且唯一的密码。
+*   **安全 Cookie**: 当启用 TLS 时，会话 Cookie 会自动设置 `Secure` 标志。
 *   **日志详细程度**: 请注意，请求的 URL 会被记录在日志中。在生产环境中，您可能需要调整日志级别或格式，以避免记录敏感数据。
+
+### 🔐 生成密码哈希
+
+`ADMIN_PASSWORD_HASH` 字段必须包含密码的 bcrypt 哈希值。您可以使用以下 Go 代码生成哈希：
+
+```go
+package main
+
+import (
+    "fmt"
+    "golang.org/x/crypto/bcrypt"
+)
+
+func main() {
+    password := "您的安全密码"
+    hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+    fmt.Println(string(hash))
+}
+```
+
+或者使用在线 bcrypt 生成器（不推荐用于生产环境 - 请使用本地工具）。
 
 ## 📦 快速开始
 

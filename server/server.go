@@ -99,7 +99,16 @@ func NewServer(config *common.Config) *Server {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 1024,
-			CheckOrigin:     func(r *http.Request) bool { return true },
+			CheckOrigin: func(r *http.Request) bool {
+				// Allow same-origin requests
+				origin := r.Header.Get("Origin")
+				if origin == "" {
+					return true // Allow non-browser clients
+				}
+				// Check if origin matches the server's host
+				host := r.Host
+				return origin == "http://"+host || origin == "https://"+host
+			},
 		},
 	}
 }
@@ -149,7 +158,23 @@ func Run(args []string) {
 		}
 	})
 
+	// Determine protocol based on TLS configuration
+	protocol := "http"
+	if config.TLS_CERT_FILE != "" && config.TLS_KEY_FILE != "" {
+		protocol = "https"
+	}
+
+	// Extract host and port from LISTEN_ADDR
+	_, port, _ := net.SplitHostPort(config.LISTEN_ADDR)
+	if port == "" {
+		port = "8001"
+	}
+
 	log.Printf("Server starting on %s...", config.LISTEN_ADDR)
+	log.Printf("Home page: %s://127.0.0.1:%s/ (local) | %s://<your-server-ip>:%s/ (public)", protocol, port, protocol, port)
+	log.Printf("Admin panel: %s://127.0.0.1:%s/admin/ (local) | %s://<your-server-ip>:%s/admin/ (public)", protocol, port, protocol, port)
+	log.Printf("WebSocket endpoint: %ss://127.0.0.1:%s%s (local) | %ss://<your-server-ip>:%s%s (public)", protocol, port, config.WEBSOCKET_PATH, protocol, port, config.WEBSOCKET_PATH)
+
 	if config.TLS_CERT_FILE != "" && config.TLS_KEY_FILE != "" {
 		log.Printf("Using TLS certificates: %s and %s", config.TLS_CERT_FILE, config.TLS_KEY_FILE)
 		if err := http.ListenAndServeTLS(config.LISTEN_ADDR, config.TLS_CERT_FILE, config.TLS_KEY_FILE, mainHandler); err != nil {
@@ -164,10 +189,10 @@ func Run(args []string) {
 
 func (s *Server) cleanupDisconnectedClients() {
 	for {
-		time.Sleep(10 * time.Second) // Check every 10 seconds
+		time.Sleep(common.CleanupInterval)
 		s.mu.Lock()
 		for clientID, info := range s.disconnectedClients {
-			if time.Since(info.DisconnectedAt) > 30*time.Second {
+			if time.Since(info.DisconnectedAt) > common.DisconnectedExpiry {
 				log.Printf("Cleaning up expired disconnected client: %s", clientID)
 				if info.ClientInfo.ProxyUser != "" {
 					delete(s.proxyUsers, info.ClientInfo.ProxyUser)
@@ -285,7 +310,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 				}
 				delete(s.disconnectedClients, authReq.ClientID)
 				log.Printf("Client ID %s was invalidated by admin; rejecting reconnect. Assigning new ID.", authReq.ClientID)
-			} else if time.Since(disconnectedInfo.DisconnectedAt) <= 30*time.Second {
+			} else if time.Since(disconnectedInfo.DisconnectedAt) <= common.DisconnectedExpiry {
 				// Re-connecting client within the 30-second window
 				clientInfo = disconnectedInfo.ClientInfo
 				clientInfo.Conn = conn // Update with new connection
@@ -330,6 +355,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 
 	if len(s.clients) >= s.config.MAX_CLIENTS {
 		log.Println("Max clients reached. Rejecting new connection.")
+		s.mu.Unlock() // Release lock before network operation
 		conn.WriteJSON(common.Message{Type: "auth_response", Payload: common.AuthResponse{Success: false, Message: "Server is full"}})
 		return
 	}
@@ -485,7 +511,7 @@ func (s *Server) handleControlChannel(conn *websocket.Conn) {
 }
 
 func (s *Server) authenticateClient(conn *websocket.Conn) (bool, common.AuthRequest) {
-	conn.SetReadDeadline(time.Now().Add(10 * time.Second))
+	conn.SetReadDeadline(time.Now().Add(common.AuthTimeout))
 	defer conn.SetReadDeadline(time.Time{})
 
 	var msg common.Message
@@ -566,7 +592,7 @@ func (s *Server) startProxyListener(client *ClientInfo, remotePort int, localAdd
 	publicURL := fmt.Sprintf("tcp://<your-server-ip>:%d or http(s)://<your-server-ip>:%d", remotePort, remotePort)
 	log.Printf("Started public listener for client %s on %s, forwarding to %s", client.RemoteAddr, listenAddr, localAddr)
 	select {
-	case client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: true, PublicURL: publicURL}}:
+	case client.sendChan <- common.Message{Type: "proxy_response", Payload: common.ProxyResponse{Success: true, PublicURL: publicURL, RemotePort: remotePort}}:
 	case <-client.done:
 		// Client disconnected, do nothing
 		return
@@ -640,7 +666,7 @@ func (s *Server) handleDataTunnel(dataConn *websocket.Conn, tunnelID string, cli
 		delete(s.activeTCPConnections, tunnelID)
 		s.mu.Unlock()
 		log.Printf("handleDataTunnel: Tunnel %s closed.", tunnelID)
-	case <-time.After(10 * time.Second):
+	case <-time.After(common.DataTunnelTimeout):
 		log.Printf("handleDataTunnel: Timeout waiting for public connection for tunnel %s", tunnelID)
 		select {
 		case publicConn := <-tunnelChan:

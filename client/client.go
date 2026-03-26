@@ -35,9 +35,7 @@ type WebSocketConn interface {
 }
 
 const (
-	reconnectDelay = 5 * time.Second
-	readTimeout    = 30 * time.Second
-	pingInterval   = (readTimeout * 9) / 10 // Ping more frequently than timeout
+	pingInterval = (common.ReadTimeout * 9) / 10 // Ping more frequently than timeout
 )
 
 // ClientState holds the dynamic state of the client's forwarding configuration.
@@ -140,8 +138,8 @@ func Run(args []string) {
 		log.Printf("Attempting to connect to server at %s...", *serverAddr)
 		controlConn, _, err := websocket.DefaultDialer.Dial(*serverAddr, nil)
 		if err != nil {
-			log.Printf("Failed to connect to server: %v. Retrying in %v...", err, reconnectDelay)
-			timer := time.NewTimer(reconnectDelay)
+			log.Printf("Failed to connect to server: %v. Retrying in %v...", err, common.ReconnectDelay)
+			timer := time.NewTimer(common.ReconnectDelay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -165,7 +163,7 @@ func Run(args []string) {
 			// For other auth errors (e.g., network issues), retry.
 			log.Println("Retrying in 5 seconds...")
 			controlConn.Close()
-			timer := time.NewTimer(reconnectDelay)
+			timer := time.NewTimer(common.ReconnectDelay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -179,9 +177,14 @@ func Run(args []string) {
 		log.Println("Authentication successful.")
 
 		// Request proxy for each forward config
-		for _, forward := range clientState.Forwards {
-			if err := requestProxy(controlConn, forward.REMOTE_PORT, forward.LOCAL_ADDR, clientState.ClientID); err != nil {
+		for i, forward := range clientState.Forwards {
+			actualPort, err := requestProxy(controlConn, forward.REMOTE_PORT, forward.LOCAL_ADDR, clientState.ClientID)
+			if err != nil {
 				log.Printf("Failed to request proxy for %s:%d: %v", forward.LOCAL_ADDR, forward.REMOTE_PORT, err)
+			} else if actualPort > 0 && forward.REMOTE_PORT == 0 {
+				// Server assigned a random port, update the local state
+				clientState.Forwards[i].REMOTE_PORT = actualPort
+				log.Printf("Server assigned random port %d for local %s", actualPort, forward.LOCAL_ADDR)
 			}
 		}
 
@@ -197,8 +200,8 @@ func Run(args []string) {
 			// Context was cancelled, the loop will terminate on the next iteration.
 
 		default:
-			log.Printf("Connection to server lost. Attempting to reconnect in %v...", reconnectDelay)
-			timer := time.NewTimer(reconnectDelay)
+			log.Printf("Connection to server lost. Attempting to reconnect in %v...", common.ReconnectDelay)
+			timer := time.NewTimer(common.ReconnectDelay)
 			select {
 			case <-ctx.Done():
 				timer.Stop()
@@ -257,20 +260,21 @@ func authenticate(conn WebSocketConn, token, totpSecret, clientID, proxyUser, pr
 }
 
 // requestProxy sends a request to the server to open a public port.
-func requestProxy(conn WebSocketConn, remotePort int, localAddr string, clientID string) error {
+// Returns the actual remote port assigned by the server.
+func requestProxy(conn WebSocketConn, remotePort int, localAddr string, clientID string) (int, error) {
 	req := common.Message{Type: "proxy_request", Payload: common.ProxyRequest{RemotePort: remotePort, LocalAddr: localAddr, ClientID: clientID}}
 	if err := conn.WriteJSON(req); err != nil {
-		return fmt.Errorf("failed to send proxy request: %w", err)
+		return 0, fmt.Errorf("failed to send proxy request: %w", err)
 	}
 
 	// Wait for proxy response.
 	var resp common.Message
 	if err := conn.ReadJSON(&resp); err != nil {
-		return fmt.Errorf("failed to read proxy response: %w", err)
+		return 0, fmt.Errorf("failed to read proxy response: %w", err)
 	}
 
 	if resp.Type != "proxy_response" {
-		return fmt.Errorf("unexpected message type: %s", resp.Type)
+		return 0, fmt.Errorf("unexpected message type: %s", resp.Type)
 	}
 
 	var proxyResp common.ProxyResponse
@@ -278,11 +282,11 @@ func requestProxy(conn WebSocketConn, remotePort int, localAddr string, clientID
 	json.Unmarshal(payloadBytes, &proxyResp)
 
 	if !proxyResp.Success {
-		return fmt.Errorf("server failed to set up proxy: %s", proxyResp.Message)
+		return 0, fmt.Errorf("server failed to set up proxy: %s", proxyResp.Message)
 	}
 
 	log.Printf("Server confirmed proxy. Public URL: %s", proxyResp.PublicURL)
-	return nil
+	return proxyResp.RemotePort, nil
 }
 
 // listenForNewConnections waits for messages from the server and handles them.
@@ -291,9 +295,9 @@ func listenForNewConnections(ctx context.Context, controlConn WebSocketConn, ser
 	errChan := make(chan error, 1)
 
 	// Set a pong handler to extend the read deadline upon receiving a pong.
-	controlConn.SetReadDeadline(time.Now().Add(readTimeout))
+	controlConn.SetReadDeadline(time.Now().Add(common.ReadTimeout))
 	controlConn.SetPongHandler(func(string) error {
-		controlConn.SetReadDeadline(time.Now().Add(readTimeout))
+		controlConn.SetReadDeadline(time.Now().Add(common.ReadTimeout))
 		return nil
 	})
 

@@ -117,7 +117,11 @@ func (s *Server) handleHTTP(w http.ResponseWriter, r *http.Request) {
 		copyHeader(w.Header(), resp.Headers)
 		w.WriteHeader(resp.StatusCode)
 		w.Write(resp.Body)
-	case <-time.After(30 * time.Second):
+	case <-time.After(common.ProxyTimeout):
+		// Clean up the pending request on timeout
+		s.mu.Lock()
+		delete(s.pendingRequests, httpReq.RequestID)
+		s.mu.Unlock()
 		http.Error(w, "Request timed out", http.StatusGatewayTimeout)
 	}
 }
@@ -167,10 +171,18 @@ func (s *Server) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 	select {
 	case resp := <-respChan:
 		if !resp.Success {
+			// Clean up the pending connect on failure
+			s.mu.Lock()
+			delete(s.pendingConnects, tunnelID)
+			s.mu.Unlock()
 			http.Error(w, "Failed to connect to target host: "+resp.Error, http.StatusServiceUnavailable)
 			return
 		}
-	case <-time.After(30 * time.Second):
+	case <-time.After(common.ProxyTimeout):
+		// Clean up the pending connect on timeout
+		s.mu.Lock()
+		delete(s.pendingConnects, tunnelID)
+		s.mu.Unlock()
 		http.Error(w, "Request timed out", http.StatusGatewayTimeout)
 		return
 	}
@@ -199,8 +211,10 @@ func (s *Server) handleHTTPS(w http.ResponseWriter, r *http.Request) {
 
 	// We need a way to associate the hijacked connection with the data tunnel.
 	// We can use the tunnel ID for this.
+	s.mu.Lock()
 	s.activeTunnels[tunnelID] = make(chan net.Conn, 1)
 	s.activeTunnels[tunnelID] <- clientConn
+	s.mu.Unlock()
 
 	log.Printf("CONNECT tunnel %s established and waiting for data connection.", tunnelID)
 }

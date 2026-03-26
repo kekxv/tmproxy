@@ -245,16 +245,18 @@ func TestRequestProxySuccess(t *testing.T) {
 		msg := args.Get(0).(*common.Message)
 		msg.Type = "proxy_response"
 		msg.Payload = common.ProxyResponse{
-			Success:   true,
-			Message:   "Proxy established",
-			PublicURL: "http://example.com",
+			Success:    true,
+			Message:    "Proxy established",
+			PublicURL:  "http://example.com:8080",
+			RemotePort: 8080,
 		}
 	}).Return(nil)
 
 	// Test the requestProxy function
-	err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
+	port, err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
 
 	assert.NoError(t, err)
+	assert.Equal(t, 8080, port)
 	mockConn.AssertExpectations(t)
 }
 
@@ -267,7 +269,7 @@ func TestRequestProxyWriteJSONError(t *testing.T) {
 	mockConn.On("WriteJSON", mock.AnythingOfType("common.Message")).Return(fmt.Errorf("write error"))
 
 	// Test the requestProxy function
-	err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
+	_, err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to send proxy request")
@@ -284,7 +286,7 @@ func TestRequestProxyReadJSONError(t *testing.T) {
 	mockConn.On("ReadJSON", mock.AnythingOfType("*common.Message")).Return(fmt.Errorf("read error"))
 
 	// Test the requestProxy function
-	err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
+	_, err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "failed to read proxy response")
@@ -308,7 +310,7 @@ func TestRequestProxyFailure(t *testing.T) {
 	}).Return(nil)
 
 	// Test the requestProxy function
-	err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
+	_, err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "server failed to set up proxy")
@@ -328,7 +330,7 @@ func TestRequestProxyUnexpectedMessageType(t *testing.T) {
 	}).Return(nil)
 
 	// Test the requestProxy function
-	err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
+	_, err := requestProxy(mockConn, 8080, "127.0.0.1:3000", "test-client-id")
 
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "unexpected message type")

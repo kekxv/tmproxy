@@ -36,9 +36,10 @@ type ProxyRequest struct {
 // ProxyResponse is the payload for the server's response to a proxy request.
 // It confirms the port that was opened and provides a URL for access.
 type ProxyResponse struct {
-	Success   bool   `json:"success"`
-	Message   string `json:"message"`
-	PublicURL string `json:"public_url"`
+	Success    bool   `json:"success"`
+	Message    string `json:"message"`
+	PublicURL  string `json:"public_url"`
+	RemotePort int    `json:"remote_port"` // The actual port assigned (useful for random port assignment)
 }
 
 // LocalConnectFailed is a message from the client to the server

@@ -1,6 +1,7 @@
 # tmproxy: Lightweight Reverse Proxy Tool
 
-![Go-Proxy Logo](https://raw.githubusercontent.com/your-username/tmproxy/main/docs/logo.png) <!-- Placeholder for a logo if you add one -->
+[![Build and Test](https://github.com/kekxv/tmproxy/actions/workflows/build.yml/badge.svg)](https://github.com/kekxv/tmproxy/actions/workflows/build.yml)
+[![Release](https://github.com/kekxv/tmproxy/actions/workflows/release.yml/badge.svg)](https://github.com/kekxv/tmproxy/actions/workflows/release.yml)
 
 ## 🚀 Project Overview
 
@@ -10,10 +11,11 @@ tmproxy is a lightweight, secure, and easy-to-distribute reverse proxy (or intra
 
 *   **Single-File Solution**: Client and server logic compiled into one Go binary.
 *   **Dynamic TOTP Authentication**: Secure authentication using Time-based One-Time Passwords to mitigate key leakage risks.
+*   **Secure Password Hashing**: Admin passwords are stored as bcrypt hashes for enhanced security.
 *   **Automatic Configuration**: Server automatically generates `config.json` with a random TOTP key on first run.
 *   **Web-based Client Guidance**: Server provides a simple HTTP/S page with instructions and dynamic download commands for the client.
 *   **Cross-Platform Support**: Easily cross-compile for Linux, Windows, macOS, and other major operating systems.
-*   **Secure & Robust**: Includes connection limits, authentication timeouts, and defense mechanisms against malicious input.
+*   **Secure & Robust**: Includes connection limits, authentication timeouts, WebSocket origin validation, and defense mechanisms against malicious input.
 *   **WSS/HTTPS Support**: Supports secure WebSocket (WSS) and HTTPS connections when TLS certificates are provided.
 
 ## 🔀 HTTP/HTTPS Proxy Mode
@@ -79,7 +81,29 @@ curl -v -x http://user1:a_very_strong_password@your-server-ip:8001 https://httpb
 
 *   **Enable TLS**: HTTP Basic Authentication is **not encrypted**. For production use, it is **highly recommended** to run the server with TLS enabled (`TLS_CERT_FILE` and `TLS_KEY_FILE`) to protect your proxy credentials.
 *   **Strong Passwords**: Use strong, unique passwords for your proxy users.
+*   **Secure Cookie**: Session cookies are automatically set with `Secure` flag when TLS is enabled.
 *   **Log Verbosity**: Be aware that request URLs are logged. In a production environment, consider adjusting log levels or formats to avoid logging sensitive data.
+
+### 🔐 Generating Password Hash
+
+The `ADMIN_PASSWORD_HASH` field must contain a bcrypt hash of your password. You can generate a hash using the following Go code:
+
+```go
+package main
+
+import (
+    "fmt"
+    "golang.org/x/crypto/bcrypt"
+)
+
+func main() {
+    password := "your_secure_password"
+    hash, _ := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+    fmt.Println(string(hash))
+}
+```
+
+Or use an online bcrypt generator (not recommended for production - use local tools instead).
 
 ## 📦 Getting Started
 

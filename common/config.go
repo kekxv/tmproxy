@@ -7,6 +7,19 @@ import (
 	"time"
 
 	"github.com/pquerna/otp/totp"
+	"golang.org/x/crypto/bcrypt"
+)
+
+// Timeout constants for the proxy server
+const (
+	AuthTimeout          = 10 * time.Second  // Timeout for client authentication
+	ReadTimeout          = 30 * time.Second  // Timeout for reading messages
+	ProxyTimeout         = 30 * time.Second  // Timeout for HTTP proxy requests
+	DataTunnelTimeout    = 10 * time.Second  // Timeout for data tunnel establishment
+	ProxyIdleTimeout     = 60 * time.Second  // Timeout for idle proxy connections
+	ReconnectDelay       = 5 * time.Second   // Delay between reconnection attempts
+	DisconnectedExpiry   = 30 * time.Second  // Time before disconnected client info expires
+	CleanupInterval      = 10 * time.Second  // Interval for cleanup routines
 )
 
 type ForwardConfig struct {
@@ -33,11 +46,23 @@ type Config struct {
 	TLS_KEY_FILE    string          `json:"TLS_KEY_FILE,omitempty"`
 
 	// Admin Panel Configuration
-	ADMIN_USERNAME        string `json:"ADMIN_USERNAME"`
-	ADMIN_PASSWORD_HASH   string `json:"ADMIN_PASSWORD_HASH"` // Store hashed password
+	ADMIN_USERNAME      string `json:"ADMIN_USERNAME"`
+	ADMIN_PASSWORD_HASH string `json:"ADMIN_PASSWORD_HASH"` // bcrypt hashed password
 	ADMIN_TOTP_SECRET_KEY string `json:"ADMIN_TOTP_SECRET_KEY"`
 	ENABLE_ADMIN_TOTP     bool   `json:"ENABLE_ADMIN_TOTP"`
 	ALLOWED_PORTS         string `json:"ALLOWED_PORTS,omitempty"`
+}
+
+// HashPassword generates a bcrypt hash from a plain text password.
+func HashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
+
+// CheckPasswordHash compares a plain text password with a bcrypt hash.
+func CheckPasswordHash(password, hash string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password))
+	return err == nil
 }
 
 // LoadConfig reads the configuration from a JSON file.
@@ -73,6 +98,13 @@ func createDefaultConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to generate TOTP key: %w", err)
 	}
 
+	// Generate a random default password hash
+	// Using a random value so users MUST change it
+	defaultHash, err := HashPassword("changeme")
+	if err != nil {
+		return nil, fmt.Errorf("failed to hash default password: %w", err)
+	}
+
 	config := &Config{
 		LISTEN_ADDR:    "0.0.0.0:8001",
 		MAX_CLIENTS:    100,
@@ -89,8 +121,8 @@ func createDefaultConfig(path string) (*Config, error) {
 
 		// Admin Panel Configuration
 		ADMIN_USERNAME:        "admin",
-		ADMIN_PASSWORD_HASH:   "changeme", // IMPORTANT: Change this default password in your config file!
-		ADMIN_TOTP_SECRET_KEY: "",         // Leave empty to disable TOTP for admin, or generate one
+		ADMIN_PASSWORD_HASH:   defaultHash, // bcrypt hashed default password "changeme"
+		ADMIN_TOTP_SECRET_KEY: "",          // Leave empty to disable TOTP for admin, or generate one
 		ENABLE_ADMIN_TOTP:     false,
 		ALLOWED_PORTS:         "", // Example: "8000-9000,9099"
 	}
@@ -100,7 +132,7 @@ func createDefaultConfig(path string) (*Config, error) {
 		return nil, fmt.Errorf("failed to marshal default config: %w", err)
 	}
 
-	if err := os.WriteFile(path, data, 0644); err != nil {
+	if err := os.WriteFile(path, data, 0600); err != nil {
 		return nil, fmt.Errorf("failed to write config file: %w", err)
 	}
 
@@ -108,6 +140,7 @@ func createDefaultConfig(path string) (*Config, error) {
 	fmt.Println("Scan this QR code with your authenticator app (e.g., Google Authenticator):")
 	fmt.Printf("Or use this URI: %s\n", key.URL())
 	fmt.Printf("Your TOTP Secret Key is: %s\n", key.Secret())
+	fmt.Println("\n⚠️  IMPORTANT: The default admin password is 'changeme'. Please change it immediately!")
 
 	return config, nil
 }

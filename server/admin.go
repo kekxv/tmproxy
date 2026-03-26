@@ -190,7 +190,13 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if creds.Username != s.config.ADMIN_USERNAME || creds.Password != s.config.ADMIN_PASSWORD_HASH {
+	if creds.Username != s.config.ADMIN_USERNAME {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Invalid credentials"})
+		return
+	}
+
+	if !common.CheckPasswordHash(creds.Password, s.config.ADMIN_PASSWORD_HASH) {
 		w.WriteHeader(http.StatusUnauthorized)
 		json.NewEncoder(w).Encode(map[string]string{"message": "Invalid credentials"})
 		return
@@ -209,12 +215,15 @@ func (s *Server) handleAdminLogin(w http.ResponseWriter, r *http.Request) {
 	s.adminSessions[sessionToken] = true
 	s.mu.Unlock()
 
+	// Set Secure flag based on TLS configuration
+	secure := s.config.TLS_CERT_FILE != "" && s.config.TLS_KEY_FILE != ""
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     "admin_session",
 		Value:    sessionToken,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false,
+		Secure:   secure,
 		SameSite: http.SameSiteLaxMode,
 	})
 

@@ -132,3 +132,45 @@ func TestGenerateTOTP(t *testing.T) {
 	assert.Error(t, err)
 	assert.Empty(t, token)
 }
+
+// TestHashPassword tests the HashPassword function.
+func TestHashPassword(t *testing.T) {
+	password := "testpassword123"
+
+	hash, err := HashPassword(password)
+
+	assert.NoError(t, err)
+	assert.NotEmpty(t, hash)
+	assert.NotEqual(t, password, hash, "Hash should not be the same as plain password")
+	assert.True(t, len(hash) > 50, "bcrypt hash should be longer than 50 characters")
+}
+
+// TestCheckPasswordHash tests the CheckPasswordHash function.
+func TestCheckPasswordHash(t *testing.T) {
+	password := "testpassword123"
+	hash, _ := HashPassword(password)
+
+	// Test correct password
+	assert.True(t, CheckPasswordHash(password, hash), "Correct password should validate")
+
+	// Test wrong password
+	assert.False(t, CheckPasswordHash("wrongpassword", hash), "Wrong password should not validate")
+
+	// Test empty password
+	assert.False(t, CheckPasswordHash("", hash), "Empty password should not validate")
+
+	// Test invalid hash
+	assert.False(t, CheckPasswordHash(password, "invalid_hash"), "Invalid hash should not validate")
+}
+
+// TestHashPassword_DifferentHashes tests that each hash is unique.
+func TestHashPassword_DifferentHashes(t *testing.T) {
+	password := "samepassword"
+
+	hash1, _ := HashPassword(password)
+	hash2, _ := HashPassword(password)
+
+	assert.NotEqual(t, hash1, hash2, "Each bcrypt hash should be unique due to salt")
+	assert.True(t, CheckPasswordHash(password, hash1))
+	assert.True(t, CheckPasswordHash(password, hash2))
+}

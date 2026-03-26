@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gemini-cli/tmproxy/common"
 	"github.com/gorilla/websocket"
 )
 
@@ -23,7 +24,7 @@ type Pinger struct {
 // NewPinger 创建一个新的 Pinger，interval 为心跳间隔（建议 >= 5s）。
 func NewPinger(interval time.Duration) *Pinger {
 	if interval <= 0 {
-		interval = 10 * time.Second
+		interval = common.ReadTimeout / 2
 	}
 	return &Pinger{
 		interval: interval,
@@ -84,7 +85,7 @@ func (p *Pinger) run(ctx context.Context) {
 				return
 			}
 
-			deadline := time.Now().Add(5 * time.Second)
+			deadline := time.Now().Add(common.ReconnectDelay)
 			if err := conn.WriteControl(websocket.PingMessage, nil, deadline); err != nil {
 				// 在发送失败（例如连接已关闭）时，停止 pinger 并退出，避免持续写操作导致 "use of closed network connection"
 				log.Printf("Pinger: Failed to send ping: %v", err)
