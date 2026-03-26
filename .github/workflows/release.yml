@@ -1,65 +1,102 @@
-
-name: Release tmproxy
+name: Check Version and Release
 
 permissions:
   contents: write
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+    paths:
+      - 'version'
+      - '.github/workflows/release.yml'
+  workflow_dispatch:
 
 jobs:
-  build-and-release:
+  check-and-release:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v3
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Set up Go
+      - name: Read version from file
+        id: get_version
+        run: echo "VERSION=$(cat version)" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          TAG_EXISTS=$(git tag -l "${{ steps.get_version.outputs.VERSION }}" | wc -l)
+          echo "TAG_EXISTS=$TAG_EXISTS" >> $GITHUB_OUTPUT
+
+      - name: Setup Go
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         uses: actions/setup-go@v4
         with:
-          go-version: '1.24.5' # Specify a Go version
+          go-version: '1.24.5'
 
       - name: Get dependencies
-        run: go get -v -t -d ./...
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: go mod download
 
-      - name: Get test
-        run: go test -timeout 10s ./...
+      - name: Run tests
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: go test ./... -v -timeout 2m
+
+      - name: Push tag
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: |
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          git tag "${{ steps.get_version.outputs.VERSION }}"
+          git push origin "${{ steps.get_version.outputs.VERSION }}"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build for Linux (amd64)
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o release/tmproxy-linux-amd64 main.go
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -o release/tmproxy-linux-amd64 main.go
 
       - name: Build for Linux (arm64)
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -o release/tmproxy-linux-arm64 main.go
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -o release/tmproxy-linux-arm64 main.go
 
       - name: Build for Linux (armv6)
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=6 go build -o release/tmproxy-linux-armv6 main.go
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=6 go build -ldflags="-s -w" -o release/tmproxy-linux-armv6 main.go
 
       - name: Build for Linux (armv7)
-        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -o release/tmproxy-linux-armv7 main.go
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 go build -ldflags="-s -w" -o release/tmproxy-linux-armv7 main.go
 
       - name: Build for Windows (amd64)
-        run: CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -o release/tmproxy-windows-amd64.exe main.go
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: CGO_ENABLED=0 GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -o release/tmproxy-windows-amd64.exe main.go
 
       - name: Build for macOS (amd64)
-        run: CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -o release/tmproxy-darwin-amd64 main.go
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -o release/tmproxy-darwin-amd64 main.go
 
       - name: Build for macOS (arm64)
-        run: CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -o release/tmproxy-darwin-arm64 main.go
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -o release/tmproxy-darwin-arm64 main.go
 
       - name: Create Release
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         id: create_release
         uses: actions/create-release@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Release ${{ github.ref }}
+          tag_name: ${{ steps.get_version.outputs.VERSION }}
+          release_name: Release ${{ steps.get_version.outputs.VERSION }}
           draft: false
           prerelease: false
 
       - name: Upload Linux (amd64) Asset
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,6 +107,7 @@ jobs:
           asset_content_type: application/octet-stream
 
       - name: Upload Linux (arm64) Asset
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -80,6 +118,7 @@ jobs:
           asset_content_type: application/octet-stream
 
       - name: Upload Linux (armv6) Asset
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -90,6 +129,7 @@ jobs:
           asset_content_type: application/octet-stream
 
       - name: Upload Linux (armv7) Asset
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -100,6 +140,7 @@ jobs:
           asset_content_type: application/octet-stream
 
       - name: Upload Windows (amd64) Asset
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -110,6 +151,7 @@ jobs:
           asset_content_type: application/octet-stream
 
       - name: Upload macOS (amd64) Asset
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -120,6 +162,7 @@ jobs:
           asset_content_type: application/octet-stream
 
       - name: Upload macOS (arm64) Asset
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -129,12 +172,14 @@ jobs:
           asset_name: tmproxy-darwin-arm64
           asset_content_type: application/octet-stream
 
-      - run: mv release clients
-      - uses: montudor/action-zip@v1
-        with:
-          args: zip -qq -r clients.zip clients
+      - name: Create clients.zip
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: |
+          mv release clients
+          zip -qq -r clients.zip clients
 
-      - name: Upload clients Asset
+      - name: Upload clients.zip Asset
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
         uses: actions/upload-release-asset@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -143,3 +188,15 @@ jobs:
           asset_path: ./clients.zip
           asset_name: clients.zip
           asset_content_type: application/octet-stream
+
+      - name: Summary
+        if: steps.check_tag.outputs.TAG_EXISTS == '0'
+        run: |
+          echo "## Release Created :rocket:" >> $GITHUB_STEP_SUMMARY
+          echo "Version: ${{ steps.get_version.outputs.VERSION }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Skip Summary
+        if: steps.check_tag.outputs.TAG_EXISTS != '0'
+        run: |
+          echo "## Release Skipped :information_source:" >> $GITHUB_STEP_SUMMARY
+          echo "Tag ${{ steps.get_version.outputs.VERSION }} already exists" >> $GITHUB_STEP_SUMMARY
