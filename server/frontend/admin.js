@@ -9,6 +9,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const modalInput = document.getElementById('modalInput');
     const modalRemotePortInput = document.getElementById('modalRemotePortInput');
     const modalLocalAddrInput = document.getElementById('modalLocalAddrInput');
+    const modalOldPasswordInput = document.getElementById('modalOldPasswordInput');
+    const modalNewPasswordInput = document.getElementById('modalNewPasswordInput');
+    const modalConfirmPasswordInput = document.getElementById('modalConfirmPasswordInput');
     const modalConfirmBtn = document.getElementById('modalConfirmBtn');
     const modalCancelBtn = document.getElementById('modalCancelBtn');
     const modalAlertBtn = document.getElementById('modalAlertBtn');
@@ -16,6 +19,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const totpCodeElement = document.getElementById('totpCode');
     const totpContainer = document.getElementById('totp-floating-container');
+    const changePasswordBtn = document.getElementById('changePasswordBtn');
 
     let resolveModalPromise;
 
@@ -32,6 +36,9 @@ document.addEventListener('DOMContentLoaded', () => {
             modalInput.style.display = 'none';
             modalRemotePortInput.style.display = 'none';
             modalLocalAddrInput.style.display = 'none';
+            modalOldPasswordInput.style.display = 'none';
+            modalNewPasswordInput.style.display = 'none';
+            modalConfirmPasswordInput.style.display = 'none';
 
             if (type === 'alert') {
                 modalAlertBtn.style.display = 'inline-block';
@@ -47,6 +54,15 @@ document.addEventListener('DOMContentLoaded', () => {
                 modalLocalAddrInput.value = '';
                 modalRemotePortInput.style.display = 'block';
                 modalLocalAddrInput.style.display = 'block';
+                modalConfirmBtn.style.display = 'inline-block';
+                modalCancelBtn.style.display = 'inline-block';
+            } else if (type === 'changePasswordPrompt') {
+                modalOldPasswordInput.value = '';
+                modalNewPasswordInput.value = '';
+                modalConfirmPasswordInput.value = '';
+                modalOldPasswordInput.style.display = 'block';
+                modalNewPasswordInput.style.display = 'block';
+                modalConfirmPasswordInput.style.display = 'block';
                 modalConfirmBtn.style.display = 'inline-block';
                 modalCancelBtn.style.display = 'inline-block';
             }
@@ -103,6 +119,12 @@ document.addEventListener('DOMContentLoaded', () => {
             resolveModalPromise({
                 remotePort: parseInt(modalRemotePortInput.value),
                 localAddr: modalLocalAddrInput.value
+            });
+        } else if (modalOldPasswordInput.style.display === 'block') {
+            resolveModalPromise({
+                oldPassword: modalOldPasswordInput.value,
+                newPassword: modalNewPasswordInput.value,
+                confirmPassword: modalConfirmPasswordInput.value
             });
         } else {
             resolveModalPromise(true);
@@ -333,4 +355,53 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial fetch and set interval for refreshing data
     fetchData();
     setInterval(fetchData, 5000); // Refresh every 5 seconds
+
+    // Change password functionality
+    if (changePasswordBtn) {
+        changePasswordBtn.onclick = async () => {
+            const result = await showModal('Change Password', 'Please enter your current and new password:', 'changePasswordPrompt');
+            if (result) {
+                const { oldPassword, newPassword, confirmPassword } = result;
+
+                // Validate inputs
+                if (!oldPassword || !newPassword || !confirmPassword) {
+                    await showModal('Error', 'All fields are required!', 'alert');
+                    return;
+                }
+
+                if (newPassword !== confirmPassword) {
+                    await showModal('Error', 'New passwords do not match!', 'alert');
+                    return;
+                }
+
+                if (newPassword.length < 4) {
+                    await showModal('Error', 'Password must be at least 4 characters long!', 'alert');
+                    return;
+                }
+
+                try {
+                    const response = await fetch('/api/admin/change-password', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                        },
+                        body: JSON.stringify({
+                            old_password: oldPassword,
+                            new_password: newPassword
+                        }),
+                    });
+                    const data = await response.json();
+
+                    if (response.ok && data.success) {
+                        await showModal('Success', 'Password changed successfully!', 'alert');
+                    } else {
+                        await showModal('Error', `Failed to change password: ${data.message || 'Unknown error'}`, 'alert');
+                    }
+                } catch (error) {
+                    console.error('Error changing password:', error);
+                    await showModal('Error', 'Error changing password.', 'alert');
+                }
+            }
+        };
+    }
 });

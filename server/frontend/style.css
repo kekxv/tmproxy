@@ -90,6 +90,27 @@ p { margin-bottom: 1em; }
     border-radius: 4px;
 }
 
+/* Password input styles */
+#modalOldPasswordInput, #modalNewPasswordInput, #modalConfirmPasswordInput {
+    width: calc(100% - 20px);
+    padding: 12px;
+    margin-top: 12px;
+    border: 1px solid #ccc;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+#modalOldPasswordInput:focus, #modalNewPasswordInput:focus, #modalConfirmPasswordInput:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0, 123, 255, 0.15);
+}
+
+#modalOldPasswordInput::placeholder, #modalNewPasswordInput::placeholder, #modalConfirmPasswordInput::placeholder {
+    color: #999;
+}
+
 .add-forward-button {
     background-color: #28a745;
     color: white;

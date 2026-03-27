@@ -74,6 +74,17 @@
         .delete-button:hover {
             background-color: #c82333;
         }
+        .action-button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 15px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .action-button:hover {
+            background-color: #0056b3;
+        }
     </style>
 </head>
 <body>
@@ -84,6 +95,12 @@
             <p>Client TOTP: <span id="totpCode">Loading...</span></p>
         </div>
 
+        <!-- Account Settings Section -->
+        <div class="admin-section">
+            <h3>Account Settings</h3>
+            <button id="changePasswordBtn" class="action-button">Change Password</button>
+        </div>
+
         <div id="customModal" class="modal">
             <div class="modal-content">
                 <span class="close-button">&times;</span>
@@ -92,6 +109,10 @@
                 <input type="text" id="modalInput" style="display: none;">
                 <input type="number" id="modalRemotePortInput" placeholder="Remote Port" style="display: none;">
                 <input type="text" id="modalLocalAddrInput" placeholder="Local Address (e.g., localhost:3000)" style="display: none;">
+                <!-- Password change inputs -->
+                <input type="password" id="modalOldPasswordInput" placeholder="Current Password" style="display: none;">
+                <input type="password" id="modalNewPasswordInput" placeholder="New Password" style="display: none;">
+                <input type="password" id="modalConfirmPasswordInput" placeholder="Confirm New Password" style="display: none;">
                 <div class="modal-buttons">
                     <button id="modalConfirmBtn" style="display: none;">OK</button>
                     <button id="modalCancelBtn" style="display: none;">Cancel</button>

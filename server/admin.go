@@ -269,3 +269,59 @@ func (s *Server) requireAdminAuth(next http.HandlerFunc) http.HandlerFunc {
 		next.ServeHTTP(w, r)
 	}
 }
+
+// handleApiChangePassword handles password change requests from the admin panel.
+// It validates the old password and updates the config with a new password hash.
+func (s *Server) handleApiChangePassword(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "Invalid request body", http.StatusBadRequest)
+		return
+	}
+
+	// Validate the old password
+	if !common.CheckPasswordHash(req.OldPassword, s.config.ADMIN_PASSWORD_HASH) {
+		w.WriteHeader(http.StatusUnauthorized)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Invalid old password"})
+		return
+	}
+
+	// Validate new password
+	if req.NewPassword == "" {
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{"message": "New password cannot be empty"})
+		return
+	}
+
+	// Generate new password hash
+	newHash, err := common.HashPassword(req.NewPassword)
+	if err != nil {
+		log.Printf("Error hashing new password: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Failed to hash password"})
+		return
+	}
+
+	// Update the config in memory
+	s.config.ADMIN_PASSWORD_HASH = newHash
+
+	// Save the config to file
+	if err := s.saveConfig(); err != nil {
+		log.Printf("Error saving config: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		json.NewEncoder(w).Encode(map[string]string{"message": "Failed to save config file"})
+		return
+	}
+
+	log.Println("Admin password changed successfully")
+	json.NewEncoder(w).Encode(map[string]bool{"success": true})
+}

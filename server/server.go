@@ -142,6 +142,7 @@ func Run(args []string) {
 	mainMux.HandleFunc("/api/admin/forwards", server.requireAdminAuth(server.handleAddForward))
 	mainMux.HandleFunc("/api/admin/delete_forward", server.requireAdminAuth(server.handleApiDeleteForward))
 	mainMux.HandleFunc("/api/admin/totp", server.requireAdminAuth(server.handleGetTOTP))
+	mainMux.HandleFunc("/api/admin/change-password", server.requireAdminAuth(server.handleApiChangePassword))
 
 	// Start a goroutine to clean up disconnected clients
 	go server.cleanupDisconnectedClients()
@@ -856,5 +857,17 @@ func (c *ClientInfo) RemoveForward(remotePort int) error {
 	}
 
 	log.Printf("Forward for client %s on remote port %d removed.", c.ID, remotePort)
+	return nil
+}
+
+// saveConfig saves the current server configuration to config.json file.
+func (s *Server) saveConfig() error {
+	data, err := json.MarshalIndent(s.config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal config: %w", err)
+	}
+	if err := os.WriteFile("config.json", data, 0600); err != nil {
+		return fmt.Errorf("failed to write config file: %w", err)
+	}
 	return nil
 }
