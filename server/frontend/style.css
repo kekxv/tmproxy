@@ -245,3 +245,262 @@ pre code {
 .modal-input-group input { margin-bottom: 12px; width: 100%; padding: 10px; border: 1px solid var(--border); border-radius: 8px; box-sizing: border-box; }
 .delete-button { color: var(--danger); background: transparent; border: 1px solid var(--danger); padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer; }
 .add-forward-button { background: var(--primary); color: white; border: none; padding: 6px 12px; border-radius: 6px; font-size: 11px; cursor: pointer; margin-right: 8px; }
+
+/* 三列布局 */
+.grid.three-col {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+@media (max-width: 1024px) {
+    .grid.three-col {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 两列布局 */
+.grid.two-col {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+@media (max-width: 768px) {
+    .grid.two-col {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* 选择器组 */
+.select-group {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.select {
+    flex: 1;
+    padding: 8px 12px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: white;
+    font-size: 13px;
+    color: var(--text-main);
+    cursor: pointer;
+}
+
+.select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+/* 单选按钮组 */
+.radio-section {
+    margin-bottom: 16px;
+}
+
+.radio-label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-sub);
+    margin-bottom: 8px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.radio-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.radio-btn {
+    position: relative;
+    cursor: pointer;
+}
+
+.radio-btn input {
+    position: absolute;
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.radio-btn span {
+    display: inline-block;
+    padding: 8px 16px;
+    background: #f1f5f9;
+    border: 2px solid transparent;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-sub);
+    transition: all 0.2s;
+}
+
+.radio-btn:hover span {
+    background: #e2e8f0;
+}
+
+.radio-btn.active span {
+    background: #dbeafe;
+    border-color: #2563eb;
+    color: #1e40af;
+}
+
+/* 蓝色卡片中单选按钮选中样式 */
+.card-blue .radio-btn.active span {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: white;
+}
+
+.card-blue .radio-btn:hover span {
+    background: #bfdbfe;
+}
+
+.card-blue .radio-btn.active:hover span {
+    background: #2563eb;
+}
+
+/* 按钮组 */
+.button-group {
+    margin-bottom: 12px;
+}
+
+.btn-download-small {
+    display: inline-block;
+    background: var(--primary);
+    color: white;
+    padding: 8px 16px;
+    border-radius: 6px;
+    font-weight: 600;
+    text-decoration: none;
+    font-size: 13px;
+    transition: background 0.2s;
+}
+
+.btn-download-small:hover {
+    background: var(--primary-hover);
+}
+
+/* 卡片行 */
+.card-row {
+    margin-bottom: 24px;
+}
+
+/* 卡片头部 */
+.card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 8px;
+}
+
+.card-header h2 {
+    margin: 0;
+    padding: 0;
+    border: none;
+    font-size: 20px;
+    font-weight: 700;
+}
+
+.card-icon {
+    font-size: 24px;
+}
+
+.card-desc {
+    color: var(--text-sub);
+    font-size: 14px;
+    margin-bottom: 16px;
+    margin-top: 0;
+}
+
+/* 彩色主题卡片 */
+.card-blue {
+    background: linear-gradient(135deg, #eff6ff 0%, #ffffff 100%);
+    border-left: 4px solid #2563eb;
+}
+
+.card-blue .card-header h2 {
+    color: #1e40af;
+}
+
+.card-blue .card-desc {
+    color: #3b82f6;
+}
+
+.card-blue pre {
+    background: #1e3a5f;
+    border-color: #2563eb;
+}
+
+.card-blue pre code {
+    color: #93c5fd;
+}
+
+.card-green {
+    background: linear-gradient(135deg, #f0fdf4 0%, #ffffff 100%);
+    border-left: 4px solid #10b981;
+}
+
+.card-green .card-header h2 {
+    color: #047857;
+}
+
+.card-green .card-desc {
+    color: #059669;
+}
+
+.card-green pre {
+    background: #064e3b;
+    border-color: #10b981;
+}
+
+.card-green pre code {
+    color: #6ee7b7;
+}
+
+.card-purple {
+    background: linear-gradient(135deg, #faf5ff 0%, #ffffff 100%);
+    border-left: 4px solid #8b5cf6;
+}
+
+.card-purple .card-header h2 {
+    color: #6d28d9;
+}
+
+.card-purple .card-desc {
+    color: #7c3aed;
+}
+
+.card-purple .info-list {
+    background: #f5f3ff;
+    border-radius: 10px;
+    padding: 16px;
+}
+
+.card-purple .info-item {
+    border-bottom-color: #ddd6fe;
+}
+
+.card-purple .info-item:last-child {
+    border-bottom: none;
+}
+
+.card-purple .info-item .label {
+    color: #6b7280;
+}
+
+.card-purple .info-item .value {
+    color: #7c3aed;
+}
+
+/* 信息列表 */
+.info-list {
+    margin-top: 12px;
+}
+
+/* 命令块 */
+.cmd-block {
+    margin-top: 16px;
+}
+

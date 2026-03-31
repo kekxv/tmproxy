@@ -21,84 +21,209 @@
             <p>tmproxy 是一个基于 WebSocket 的高性能内网穿透工具，支持端口转发、HTTP 代理和 Web 管理界面。</p>
         </section>
 
-        <section class="download-card">
-            <h2>立即开始使用</h2>
-            <p>下载适用于您系统的 tmproxy 客户端，一键开启隧道。</p>
-            <a href="/client" class="btn-download">
-                <span>下载 Client 二进制文件</span>
-            </a>
-        </section>
+        <!-- 一键启动 - 蓝色主题 -->
+        <div class="card-row">
+            <div class="card card-blue">
+                <div class="card-header">
+                    <span class="card-icon">🚀</span>
+                    <h2>一键启动</h2>
+                </div>
+                <p class="card-desc">选择系统和架构后下载并启动</p>
 
-        <div class="grid">
-            <!-- Linux 一键命令 -->
-            <div class="card">
-                <h2>🐧 Linux 一键启动</h2>
-                <p class="muted" style="font-size: 13px; margin-bottom: 12px;">自动下载、授权并启动客户端：</p>
-                <pre><code>curl -L {{.ServerHTTPURL}}/client?os=linux -o tmproxy && \
-chmod +x tmproxy && \
-./tmproxy client --server {{.ServerWsURL}} --local localhost:8080</code></pre>
+                <div class="radio-section">
+                    <label class="radio-label">操作系统</label>
+                    <div class="radio-group" id="os-group">
+                        <label class="radio-btn active">
+                            <input type="radio" name="os" value="linux" checked>
+                            <span>Linux</span>
+                        </label>
+                        <label class="radio-btn">
+                            <input type="radio" name="os" value="darwin">
+                            <span>macOS</span>
+                        </label>
+                        <label class="radio-btn">
+                            <input type="radio" name="os" value="windows">
+                            <span>Windows</span>
+                        </label>
+                    </div>
+                </div>
+
+                <div class="radio-section">
+                    <label class="radio-label">架构</label>
+                    <div class="radio-group" id="arch-group">
+                        <label class="radio-btn active">
+                            <input type="radio" name="arch" value="amd64" checked>
+                            <span>x86_64</span>
+                        </label>
+                        <label class="radio-btn">
+                            <input type="radio" name="arch" value="arm64">
+                            <span>ARM64</span>
+                        </label>
+                        <label class="radio-btn">
+                            <input type="radio" name="arch" value="armv7">
+                            <span>ARMv7</span>
+                        </label>
+                        <label class="radio-btn">
+                            <input type="radio" name="arch" value="armv6">
+                            <span>ARMv6</span>
+                        </label>
+                    </div>
+                </div>
+
+                <a id="download-btn" href="#" class="btn-download-small">下载</a>
+                <pre id="one-liner" class="cmd-block"><code>curl -L {{.ServerHTTPURL}}/client?os=linux&arch=amd64 -o tmproxy && chmod +x tmproxy && ./tmproxy client --server {{.ServerWsURL}} --local localhost:8080</code></pre>
             </div>
+        </div>
 
-            <!-- Windows 一键命令 -->
-            <div class="card">
-                <h2>🪟 Windows PowerShell</h2>
-                <p class="muted" style="font-size: 13px; margin-bottom: 12px;">在 PowerShell 中复制执行：</p>
-                <pre><code>Invoke-WebRequest -Uri "{{.ServerHTTPURL}}/client?os=windows" -OutFile "tmproxy.exe";
-.\tmproxy.exe client --server "{{.ServerWsURL}}" --local localhost:8080</code></pre>
-            </div>
-
-            <div class="card">
-                <h2>🚀 快速连接指南</h2>
-                <p>如果您已有二进制文件，直接运行：</p>
-                <pre><code>./tmproxy client \
+        <!-- 快速连接指南 - 绿色主题 -->
+        <div class="card-row">
+            <div class="card card-green">
+                <div class="card-header">
+                    <span class="card-icon">📋</span>
+                    <h2>快速连接指南</h2>
+                </div>
+                <p class="card-desc">如果您已有二进制文件，直接运行</p>
+                <pre class="cmd-block"><code>./tmproxy client \
   --server {{.ServerWsURL}} \
   --local localhost:8080</code></pre>
             </div>
+        </div>
 
-            <div class="card">
-                <h2>📊 服务器信息</h2>
-                <div class="info-item">
-                    <span class="label">服务端地址</span>
-                    <span class="value">{{.ServerHTTPURL}}</span>
+        <!-- 服务器信息 - 紫色主题 -->
+        <div class="card-row">
+            <div class="card card-purple">
+                <div class="card-header">
+                    <span class="card-icon">📊</span>
+                    <h2>服务器信息</h2>
                 </div>
-                <div class="info-item">
-                    <span class="label">WebSocket 路径</span>
-                    <span class="value">{{.ServerWsURL}}</span>
-                </div>
-                <div class="info-item">
-                    <span class="label">活跃规则数</span>
-                    <span class="value">{{len .Forwards}}</span>
+                <p class="card-desc">当前服务器配置信息</p>
+                <div class="info-list">
+                    <div class="info-item">
+                        <span class="label">服务端地址</span>
+                        <span class="value">{{.ServerHTTPURL}}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">WebSocket 路径</span>
+                        <span class="value">{{.ServerWsURL}}</span>
+                    </div>
+                    <div class="info-item">
+                        <span class="label">活跃规则数</span>
+                        <span class="value">{{len .Forwards}}</span>
+                    </div>
                 </div>
             </div>
         </div>
 
-        {{if .Forwards}}
-        <section style="margin-top: 48px;">
-            <div class="card wide-card">
-                <h2>🔗 全局公共转发规则</h2>
-                <div class="table-container">
-                    <table>
-                        <thead>
-                            <tr>
-                                <th>公共端口</th>
-                                <th>目标地址</th>
-                                <th>类型</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            {{range .Forwards}}
-                            <tr>
-                                <td><span class="badge badge-info">{{.REMOTE_PORT}}</span></td>
-                                <td><code>{{.LOCAL_ADDR}}</code></td>
-                                <td>TCP Forward</td>
-                            </tr>
-                            {{end}}
-                        </tbody>
-                    </table>
-                </div>
-            </div>
-        </section>
-        {{end}}
+        <script>
+        (function() {
+            const osGroup = document.getElementById('os-group');
+            const archGroup = document.getElementById('arch-group');
+            const downloadBtn = document.getElementById('download-btn');
+            const oneLiner = document.getElementById('one-liner');
+            const serverHTTPURL = '{{.ServerHTTPURL}}';
+            const serverWsURL = '{{.ServerWsURL}}';
+
+            const archOptions = {
+                linux: [
+                    { value: 'amd64', label: 'x86_64' },
+                    { value: 'arm64', label: 'ARM64' },
+                    { value: 'armv7', label: 'ARMv7' },
+                    { value: 'armv6', label: 'ARMv6' }
+                ],
+                darwin: [
+                    { value: 'amd64', label: 'x86_64' },
+                    { value: 'arm64', label: 'ARM64' }
+                ],
+                windows: [
+                    { value: 'amd64', label: 'x86_64' }
+                ]
+            };
+
+            function getSelectedOS() {
+                return osGroup.querySelector('input[name="os"]:checked').value;
+            }
+
+            function getSelectedArch() {
+                const selected = archGroup.querySelector('input[name="arch"]:checked');
+                return selected ? selected.value : 'amd64';
+            }
+
+            function updateArchButtons() {
+                const os = getSelectedOS();
+                const currentArch = getSelectedArch();
+                const options = archOptions[os] || archOptions.linux;
+
+                archGroup.innerHTML = '';
+                options.forEach((opt, idx) => {
+                    const label = document.createElement('label');
+                    label.className = 'radio-btn' + (idx === 0 ? ' active' : '');
+
+                    const input = document.createElement('input');
+                    input.type = 'radio';
+                    input.name = 'arch';
+                    input.value = opt.value;
+                    if (idx === 0) input.checked = true;
+
+                    const span = document.createElement('span');
+                    span.textContent = opt.label;
+
+                    label.appendChild(input);
+                    label.appendChild(span);
+                    archGroup.appendChild(label);
+
+                    // 重新绑定事件
+                    input.addEventListener('change', function() {
+                        if (this.checked) {
+                            archGroup.querySelectorAll('.radio-btn').forEach(btn => btn.classList.remove('active'));
+                            this.parentElement.classList.add('active');
+                            update();
+                        }
+                    });
+                });
+
+                update();
+            }
+
+            function update() {
+                const os = getSelectedOS();
+                const arch = getSelectedArch();
+                const url = serverHTTPURL + '/client?os=' + os + '&arch=' + arch;
+                downloadBtn.href = url;
+
+                let cmd = '';
+                if (os === 'windows') {
+                    cmd = 'Invoke-WebRequest -Uri "' + url + '" -OutFile "tmproxy.exe"; .\\tmproxy.exe client --server "' + serverWsURL + '" --local localhost:8080';
+                } else {
+                    cmd = 'curl -L ' + url + ' -o tmproxy && chmod +x tmproxy && ./tmproxy client --server ' + serverWsURL + ' --local localhost:8080';
+                }
+                oneLiner.innerHTML = '<code>' + cmd.replace(/</g, '&lt;') + '</code>';
+            }
+
+            // 绑定 OS radio 按钮事件
+            osGroup.querySelectorAll('input[name="os"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    if (this.checked) {
+                        osGroup.querySelectorAll('.radio-btn').forEach(btn => btn.classList.remove('active'));
+                        this.parentElement.classList.add('active');
+                        updateArchButtons();
+                    }
+                });
+            });
+
+            // 绑定初始 Arch radio 按钮事件
+            archGroup.querySelectorAll('input[name="arch"]').forEach(radio => {
+                radio.addEventListener('change', function() {
+                    if (this.checked) {
+                        archGroup.querySelectorAll('.radio-btn').forEach(btn => btn.classList.remove('active'));
+                        this.parentElement.classList.add('active');
+                        update();
+                    }
+                });
+            });
+
+            update();
+        })();
+        </script>
     </div>
 </body>
 </html>
