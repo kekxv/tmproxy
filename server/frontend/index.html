@@ -1,84 +1,104 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>tmproxy Server</title>
+    <title>tmproxy - 安全的内网穿透服务</title>
     <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+    <nav class="navbar">
+        <a href="/" class="logo">tmproxy</a>
+        <div class="nav-links">
+            <a href="/admin">管理后台</a>
+            <a href="https://github.com/kekxv/tmproxy" target="_blank">GitHub</a>
+        </div>
+    </nav>
+
     <div class="container">
-        <h1>tmproxy Server</h1>
-        <p>代理服务器正在运行。使用客户端进行连接。</p>
-        <p>Proxy server is running. Use the client to connect.</p>
-        
-        <h2>下载客户端 (Download Client)</h2>
-        
-        <p><b>Linux & macOS:</b></p>
-        <div class="code-block">
-            <pre id="linux-mac-cmd">curl -o tmproxy "{{.ServerHTTPURL}}/client?os=$(uname -s)&arch=$(uname -m)" && chmod +x ./tmproxy</pre>
-            <button class="copy-btn" onclick="copyToClipboard('linux-mac-cmd', this)">Copy</button>
-            <span class="copy-feedback">Copied!</span>
-        </div>
-        
-        <p><b>Windows (PowerShell):</b></p>
-        <div class="code-block">
-            <pre id="windows-cmd">Invoke-WebRequest -Uri "{{.ServerHTTPURL}}/client?os=windows&arch=amd64" -OutFile tmproxy.exe</pre>
-            <button class="copy-btn" onclick="copyToClipboard('windows-cmd', this)">Copy</button>
-            <span class="copy-feedback">Copied!</span>
-        </div>
-        
-        <h2>使用选项 (Usage Options)</h2>
-        <p>此服务器配置为 HTTP/HTTPS 代理模式。您可以连接客户端以转发端口或作为代理端点。</p>
-        <p>This server is configured for HTTP/HTTPS Proxy Mode. You can connect a client to either forward ports or to serve as a proxy endpoint.</p>
+        <section class="hero">
+            <h1>轻松穿透任何内网</h1>
+            <p>tmproxy 是一个基于 WebSocket 的高性能内网穿透工具，支持端口转发、HTTP 代理和 Web 管理界面。</p>
+        </section>
 
-        <p><b>1. 转发模式使用方法 (Forwarding Mode Usage)</b></p>
-        <div class="code-block">
-            <pre id="usage-cmd-forward">./tmproxy client --server {{.ServerWsURL}} --local localhost:3000 --remote 8080</pre>
-            <button class="copy-btn" onclick="copyToClipboard('usage-cmd-forward', this)">Copy</button>
-            <span class="copy-feedback">Copied!</span>
+        <section class="download-card">
+            <h2>立即开始使用</h2>
+            <p>下载适用于您系统的 tmproxy 客户端，一键开启隧道。</p>
+            <a href="/client" class="btn-download">
+                <span>下载 Client 二进制文件</span>
+            </a>
+        </section>
+
+        <div class="grid">
+            <!-- Linux 一键命令 -->
+            <div class="card">
+                <h2>🐧 Linux 一键启动</h2>
+                <p class="muted" style="font-size: 13px; margin-bottom: 12px;">自动下载、授权并启动客户端：</p>
+                <pre><code>curl -L {{.ServerHTTPURL}}/client?os=linux -o tmproxy && \
+chmod +x tmproxy && \
+./tmproxy client --server {{.ServerWsURL}} --local localhost:8080</code></pre>
+            </div>
+
+            <!-- Windows 一键命令 -->
+            <div class="card">
+                <h2>🪟 Windows PowerShell</h2>
+                <p class="muted" style="font-size: 13px; margin-bottom: 12px;">在 PowerShell 中复制执行：</p>
+                <pre><code>Invoke-WebRequest -Uri "{{.ServerHTTPURL}}/client?os=windows" -OutFile "tmproxy.exe";
+.\tmproxy.exe client --server "{{.ServerWsURL}}" --local localhost:8080</code></pre>
+            </div>
+
+            <div class="card">
+                <h2>🚀 快速连接指南</h2>
+                <p>如果您已有二进制文件，直接运行：</p>
+                <pre><code>./tmproxy client \
+  --server {{.ServerWsURL}} \
+  --local localhost:8080</code></pre>
+            </div>
+
+            <div class="card">
+                <h2>📊 服务器信息</h2>
+                <div class="info-item">
+                    <span class="label">服务端地址</span>
+                    <span class="value">{{.ServerHTTPURL}}</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">WebSocket 路径</span>
+                    <span class="value">{{.ServerWsURL}}</span>
+                </div>
+                <div class="info-item">
+                    <span class="label">活跃规则数</span>
+                    <span class="value">{{len .Forwards}}</span>
+                </div>
+            </div>
         </div>
 
-        <p><b>2. 代理模式使用方法 (Proxy Mode Usage)</b></p>
-        <p>连接客户端以处理特定用户的代理请求。请选择以下配置的用户之一：</p>
-        <p>Connect a client to handle proxy requests for a specific user. Choose one of the configured users below:</p>
-        <div class="code-block">
-            <pre id="proxy-usage-admin">./tmproxy client --server {{$.ServerWsURL}} --proxy_user admin --proxy_passwd admin</pre>
-            <button class="copy-btn" onclick="copyToClipboard('proxy-usage-admin', this)">Copy</button>
-            <span class="copy-feedback">Copied!</span>
-        </div>
-
-        <h2>客户端配置示例 (Client Configuration Example)</h2>
-        <p>您可以创建一个<code>config.json</code>文件来存储客户端配置，而无需在命令行中输入所有参数。</p>
-        <p>You can create a <code>config.json</code> file to store client configuration instead of entering all parameters on the command line.</p>
-        
-        <h3>基础配置 (Basic Configuration)</h3>
-        <div class="code-block">
-            <pre>{
-  "SERVER_ADDR": "ws://your-server-ip:8001/proxy_ws",
-  "TOTP_SECRET_KEY": "YOUR_TOTP_SECRET_KEY"
-}</pre>
-        </div>
-        
-        <h3>代理模式配置 (Proxy Mode Configuration)</h3>
-        <div class="code-block">
-            <pre>{
-  "SERVER_ADDR": "ws://your-server-ip:8001/proxy_ws",
-  "PROXY_USER": "user1",
-  "PROXY_PASSWD": "a_very_strong_password",
-  "TOTP_SECRET_KEY": "YOUR_TOTP_SECRET_KEY"
-}</pre>
-        </div>
-        
-        <p>将配置文件保存为<code>config.json</code>，然后只需运行：</p>
-        <p>Save the configuration file as <code>config.json</code>, then simply run:</p>
-        <div class="code-block">
-            <pre>./tmproxy client</pre>
-        </div>
-        
-        <p><b>注意：</b>如果配置文件中没有包含<code>TOTP_SECRET_KEY</code>字段，客户端启动时会提示您输入6位验证码进行登录。</p>
-        <p><b>Note:</b> If the <code>TOTP_SECRET_KEY</code> field is not included in the configuration file, the client will prompt you to enter a 6-digit verification code at startup.</p>
+        {{if .Forwards}}
+        <section style="margin-top: 48px;">
+            <div class="card wide-card">
+                <h2>🔗 全局公共转发规则</h2>
+                <div class="table-container">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>公共端口</th>
+                                <th>目标地址</th>
+                                <th>类型</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {{range .Forwards}}
+                            <tr>
+                                <td><span class="badge badge-info">{{.REMOTE_PORT}}</span></td>
+                                <td><code>{{.LOCAL_ADDR}}</code></td>
+                                <td>TCP Forward</td>
+                            </tr>
+                            {{end}}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+        {{end}}
     </div>
-    <script src="/static/script.js"></script>
 </body>
 </html>

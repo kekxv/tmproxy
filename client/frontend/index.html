@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>tmproxy - 隧道控制面板</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="login-container" class="login-card" style="display: none;">
+        <div class="header">
+            <div class="logo">tmproxy</div>
+            <p>请输入管理员 Token 访问</p>
+        </div>
+        <div class="form-group">
+            <input type="password" id="password" placeholder="Password or Token">
+        </div>
+        <button id="login-btn" class="primary block">进入管理界面</button>
+        <p id="login-error" class="error"></p>
+    </div>
+
+    <div id="dashboard-container" style="display: none;">
+        <div class="top-nav">
+            <div class="logo">tmproxy <span>Client</span></div>
+            <div class="status-box">
+                <span id="status-badge" class="badge">已断开</span>
+            </div>
+        </div>
+
+        <div class="main-grid">
+            <!-- 左侧配置 -->
+            <div class="sidebar">
+                <div class="card">
+                    <h3><span class="icon">⚙️</span> 核心配置</h3>
+                    <div class="form-group">
+                        <label>服务器地址</label>
+                        <input type="text" id="server-addr">
+                    </div>
+                    <div class="form-group">
+                        <label>代理用户 (可选)</label>
+                        <input type="text" id="proxy-user">
+                    </div>
+                    <div class="form-group">
+                        <label>代理密码 (可选)</label>
+                        <input type="password" id="proxy-passwd">
+                    </div>
+                    <div class="form-group">
+                        <label>TOTP 密钥 (可选)</label>
+                        <input type="password" id="totp-secret">
+                    </div>
+                    <div class="config-actions">
+                        <button id="start-btn" class="btn-success block">启动连接</button>
+                        <button id="stop-btn" class="btn-danger block" style="display: none;">停止服务</button>
+                    </div>
+                </div>
+
+                <div class="card logs-card">
+                    <h3><span class="icon">📝</span> 操作日志</h3>
+                    <div id="log-output"></div>
+                </div>
+            </div>
+
+            <!-- 右侧详情 -->
+            <div class="content">
+                <div class="card">
+                    <h3><span class="icon">🔗</span> 端口转发规则</h3>
+                    <div id="forward-list" class="grid-list">
+                        <!-- 规则展示区 -->
+                    </div>
+                </div>
+
+                <div class="card">
+                    <h3><span class="icon">⚡</span> 活跃 TCP 连接</h3>
+                    <div class="table-container">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>通道 ID</th>
+                                    <th>远程端口</th>
+                                    <th>本地目标</th>
+                                    <th>持续时长</th>
+                                </tr>
+                            </thead>
+                            <tbody id="conn-list">
+                                <!-- 连接展示区 -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>

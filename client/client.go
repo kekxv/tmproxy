@@ -38,18 +38,48 @@ const (
 	pingInterval = (common.ReadTimeout * 9) / 10 // Ping more frequently than timeout
 )
 
+// ConnInfo represents an active connection's metadata.
+type ConnInfo struct {
+	ID          string    `json:"id"`
+	LocalAddr   string    `json:"local_addr"`
+	RemotePort  int       `json:"remote_port"`
+	Type        string    `json:"type"` // "forward" or "connect"
+	ConnectedAt time.Time `json:"connected_at"`
+}
+
 // ClientState holds the dynamic state of the client's forwarding configuration.
 type ClientState struct {
-	mu       sync.RWMutex
-	Forwards []common.ForwardConfig // Array of forward configurations
-	ClientID string                 // Client's unique ID, assigned by server
+	mu          sync.RWMutex
+	Forwards    []common.ForwardConfig // Array of forward configurations
+	ClientID    string                 // Client's unique ID, assigned by server
+	ActiveConns map[string]ConnInfo    `json:"active_conns"` // Track active tunnels
+}
+
+// Client represents the proxy client instance.
+type Client struct {
+	Config     *common.ClientConfig
+	State      *ClientState
+	ctx        context.Context
+	cancel     context.CancelFunc
+	mu         sync.Mutex
+	isRunning  bool
+	configPath string
+}
+
+// NewClient creates a new Client instance.
+func NewClient(config *common.ClientConfig, configPath string) *Client {
+	return &Client{
+		Config: config,
+		State: &ClientState{
+			Forwards:    []common.ForwardConfig{},
+			ActiveConns: make(map[string]ConnInfo),
+		},
+		configPath: configPath,
+	}
 }
 
 // Run starts the client mode of the application.
-// It parses command-line arguments, connects to the server, handles the proxying,
-// and implements an auto-reconnect mechanism.
 func Run(args []string) {
-	// Define and parse command-line flags.
 	fs := flag.NewFlagSet("client", flag.ExitOnError)
 	configFile := fs.String("config", "config.json", "Path to the configuration file")
 	serverAddr := fs.String("server", "", "Server WebSocket URL (e.g., ws://localhost:8001/proxy_ws)")
@@ -57,159 +87,178 @@ func Run(args []string) {
 	proxyPasswd := fs.String("proxy_passwd", "", "Proxy password for authentication")
 	localAddr := fs.String("local", "", "Local address to forward to (e.g., localhost:3000)")
 	remotePort := fs.Int("remote", 0, "Remote port to listen on")
-
 	totpSecret := fs.String("totp-secret", "", "TOTP secret key for long-term authentication")
+
+	// Web mode flags
+	webMode := fs.Bool("web", false, "Enable web management interface")
+	webAddr := fs.String("web_addr", "127.0.0.1:8080", "Address for web management interface")
+	webPassword := fs.String("web_password", "", "Password for web management interface")
+
 	fs.Parse(args)
 
-	// Load configuration from file if it exists
+	// Load configuration
 	var config *common.ClientConfig
 	if _, err := os.Stat(*configFile); err == nil {
-		config, err = common.LoadClientConfig(*configFile)
-		if err != nil {
-			log.Printf("Warning: Failed to load config file: %v", err)
-		}
-	} else {
-		log.Printf("Config file '%s' not found, using command line arguments only.", *configFile)
+		config, _ = common.LoadClientConfig(*configFile)
+	}
+	if config == nil {
+		config = &common.ClientConfig{}
 	}
 
-	// Command line arguments take precedence over config file
-	if *serverAddr == "" {
-		if config != nil && config.ServerAddr != "" {
-			*serverAddr = config.ServerAddr
-		} else {
-			log.Fatal("Server URL is required. Use the --server flag or define it in the config file.")
-		}
+	// Override with flags
+	if *serverAddr != "" {
+		config.ServerAddr = *serverAddr
+	}
+	if *proxyUser != "" {
+		config.ProxyUser = *proxyUser
+	}
+	if *proxyPasswd != "" {
+		config.ProxyPasswd = *proxyPasswd
+	}
+	if *totpSecret != "" {
+		config.TOTPSecretKey = *totpSecret
+	}
+	if *webPassword != "" {
+		config.WebPassword = *webPassword
 	}
 
-	// Use config values if command line arguments are not provided
-	if *proxyUser == "" && config != nil && config.ProxyUser != "" {
-		*proxyUser = config.ProxyUser
-	}
-	if *proxyPasswd == "" && config != nil && config.ProxyPasswd != "" {
-		*proxyPasswd = config.ProxyPasswd
-	}
-	if *totpSecret == "" && config != nil && config.TOTPSecretKey != "" {
-		*totpSecret = config.TOTPSecretKey
+	c := NewClient(config, *configFile)
+
+	if *localAddr != "" {
+		c.State.mu.Lock()
+		c.State.Forwards = append(c.State.Forwards, common.ForwardConfig{LOCAL_ADDR: *localAddr, REMOTE_PORT: *remotePort})
+		c.State.mu.Unlock()
 	}
 
-	clientState := &ClientState{
-		Forwards: []common.ForwardConfig{},
-		ClientID: "", // Initialize with empty ID
+	if *webMode {
+		log.Printf("Starting web management interface at http://%s", *webAddr)
+		RunWebMode(c, *webAddr, config.WebPassword)
+		return
 	}
 
-	// If local is provided but remote is not, set remote to 0 to request a random port from the server.
-	if *localAddr != "" && *remotePort == 0 {
-		clientState.Forwards = append(clientState.Forwards, common.ForwardConfig{LOCAL_ADDR: *localAddr, REMOTE_PORT: 0})
-	} else if *localAddr != "" && *remotePort != 0 {
-		clientState.Forwards = append(clientState.Forwards, common.ForwardConfig{LOCAL_ADDR: *localAddr, REMOTE_PORT: *remotePort})
+	// CLI mode
+	if config.ServerAddr == "" {
+		log.Fatal("Server URL is required. Use the --server flag or define it in the config file.")
 	}
 
-	// Prompt for the TOTP token if no secret is provided. This is done once.
 	token := ""
-	if *totpSecret == "" {
+	if config.TOTPSecretKey == "" {
 		fmt.Print("Enter 6-digit TOTP token: ")
 		reader := bufio.NewReader(os.Stdin)
 		readToken, _ := reader.ReadString('\n')
 		token = strings.TrimSpace(readToken)
 	}
 
-	// Set up a context to manage graceful shutdown.
 	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, syscall.SIGINT, syscall.SIGTERM)
-
-	// Goroutine to handle OS signals.
 	go func() {
-		sig := <-sigChan
-		log.Printf("Received signal %v. Shutting down client gracefully...", sig)
+		<-sigChan
+		log.Println("Shutting down...")
 		cancel()
 	}()
 
-	// Main reconnection loop.
+	c.Start(ctx, token)
+}
+
+// Start initiates the connection loop.
+func (c *Client) Start(ctx context.Context, manualToken string) {
+	c.mu.Lock()
+	if c.isRunning {
+		c.mu.Unlock()
+		return
+	}
+	c.ctx, c.cancel = context.WithCancel(ctx)
+	c.isRunning = true
+	c.mu.Unlock()
+
+	defer func() {
+		c.mu.Lock()
+		c.isRunning = false
+		c.mu.Unlock()
+	}()
+
 	for {
-		// Check for shutdown signal before attempting to connect.
 		select {
-		case <-ctx.Done():
-			log.Println("Client shutdown complete.")
+		case <-c.ctx.Done():
 			return
 		default:
 		}
 
-		log.Printf("Attempting to connect to server at %s...", *serverAddr)
-		controlConn, _, err := websocket.DefaultDialer.Dial(*serverAddr, nil)
+		log.Printf("Connecting to %s...", c.Config.ServerAddr)
+		conn, _, err := websocket.DefaultDialer.Dial(c.Config.ServerAddr, nil)
 		if err != nil {
-			log.Printf("Failed to connect to server: %v. Retrying in %v...", err, common.ReconnectDelay)
-			timer := time.NewTimer(common.ReconnectDelay)
+			log.Printf("Connect failed: %v. Retry in %v...", err, common.ReconnectDelay)
 			select {
-			case <-ctx.Done():
-				timer.Stop()
+			case <-c.ctx.Done():
 				return
-			case <-timer.C:
+			case <-time.After(common.ReconnectDelay):
+				continue
 			}
-			continue
 		}
 
-		log.Println("Connected to server. Authenticating...")
-		// Pass clientState.ClientID to authenticate and update it from the response
-		newClientID, err := authenticate(controlConn, token, *totpSecret, clientState.ClientID, *proxyUser, *proxyPasswd, clientState)
+		newID, err := authenticate(conn, manualToken, c.Config.TOTPSecretKey, c.State.ClientID, c.Config.ProxyUser, c.Config.ProxyPasswd, c.State)
 		if err != nil {
-			log.Printf("Authentication failed: %v", err)
-			// If the server explicitly rejected the authentication (e.g., bad token), exit.
+			log.Printf("Auth failed: %v", err)
+			conn.Close()
 			if strings.Contains(err.Error(), "server rejected authentication") {
-				log.Println("Exiting due to authentication rejection.")
-				controlConn.Close()
 				return
 			}
-			// For other auth errors (e.g., network issues), retry.
-			log.Println("Retrying in 5 seconds...")
-			controlConn.Close()
-			timer := time.NewTimer(common.ReconnectDelay)
 			select {
-			case <-ctx.Done():
-				timer.Stop()
+			case <-c.ctx.Done():
 				return
-			case <-timer.C:
+			case <-time.After(common.ReconnectDelay):
+				continue
 			}
-			continue
 		}
-		clientState.ClientID = newClientID
+		c.State.ClientID = newID
 
-		log.Println("Authentication successful.")
-
-		// Request proxy for each forward config
-		for i, forward := range clientState.Forwards {
-			actualPort, err := requestProxy(controlConn, forward.REMOTE_PORT, forward.LOCAL_ADDR, clientState.ClientID)
+		for i, forward := range c.State.Forwards {
+			actualPort, err := requestProxy(conn, forward.REMOTE_PORT, forward.LOCAL_ADDR, c.State.ClientID)
 			if err != nil {
 				log.Printf("Failed to request proxy for %s:%d: %v", forward.LOCAL_ADDR, forward.REMOTE_PORT, err)
 			} else if actualPort > 0 && forward.REMOTE_PORT == 0 {
-				// Server assigned a random port, update the local state
-				clientState.Forwards[i].REMOTE_PORT = actualPort
+				c.State.mu.Lock()
+				c.State.Forwards[i].REMOTE_PORT = actualPort
+				c.State.mu.Unlock()
 				log.Printf("Server assigned random port %d for local %s", actualPort, forward.LOCAL_ADDR)
 			}
 		}
 
-		// This function blocks until the connection is lost or the context is cancelled.
-		listenForNewConnections(ctx, controlConn, *serverAddr, clientState)
+		listenForNewConnections(c.ctx, conn, c.Config.ServerAddr, c.State)
+		conn.Close()
 
-		// After listenForNewConnections returns, the connection is considered lost.
-		controlConn.Close()
-
-		// Check if the shutdown was initiated by a signal. If not, it was a connection loss.
 		select {
-		case <-ctx.Done():
-			// Context was cancelled, the loop will terminate on the next iteration.
-
+		case <-c.ctx.Done():
+			return
 		default:
-			log.Printf("Connection to server lost. Attempting to reconnect in %v...", common.ReconnectDelay)
-			timer := time.NewTimer(common.ReconnectDelay)
+			log.Printf("Lost connection. Reconnecting in %v...", common.ReconnectDelay)
 			select {
-			case <-ctx.Done():
-				timer.Stop()
+			case <-c.ctx.Done():
 				return
-			case <-timer.C:
+			case <-time.After(common.ReconnectDelay):
 			}
 		}
 	}
+}
+
+// Stop stops the client.
+func (c *Client) Stop() {
+	c.mu.Lock()
+	if c.cancel != nil {
+		c.cancel()
+	}
+	c.isRunning = false
+	c.mu.Unlock()
+}
+
+// IsRunning returns true if the client is currently running.
+func (c *Client) IsRunning() bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.isRunning
 }
 
 // authenticate sends the TOTP token and ClientID to the server and waits for a successful response.
@@ -483,8 +532,24 @@ func handleNewTunnel(controlConn WebSocketConn, serverAddr string, state *Client
 
 	log.Printf("[%s] Data tunnel established. Proxying data...", tunnelID)
 
+	// Register connection
+	state.mu.Lock()
+	state.ActiveConns[tunnelID] = ConnInfo{
+		ID:          tunnelID,
+		LocalAddr:   localAddr,
+		RemotePort:  remotePort,
+		Type:        "forward",
+		ConnectedAt: time.Now(),
+	}
+	state.mu.Unlock()
+
 	// Start proxying data between the local service and the data tunnel.
 	common.Proxy(localConn, dataConn)
+
+	// Unregister connection
+	state.mu.Lock()
+	delete(state.ActiveConns, tunnelID)
+	state.mu.Unlock()
 
 	log.Printf("[%s] Tunnel closed.", tunnelID)
 }

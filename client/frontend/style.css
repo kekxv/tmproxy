@@ -1,0 +1,239 @@
+:root {
+    --bg-color: #f0f2f5;
+    --card-bg: #ffffff;
+    --primary: #4f46e5;
+    --primary-hover: #4338ca;
+    --success: #10b981;
+    --danger: #ef4444;
+    --text-main: #1f2937;
+    --text-sub: #6b7280;
+    --border: #e5e7eb;
+}
+
+body {
+    font-family: 'Inter', -apple-system, sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-main);
+    margin: 0;
+    padding: 0;
+}
+
+/* 顶部导航 */
+.top-nav {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    background: #111827;
+    padding: 12px 24px;
+    color: white;
+}
+
+.logo {
+    font-size: 20px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+}
+
+.logo span {
+    color: var(--primary);
+}
+
+.status-box {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+/* 状态徽章 */
+.badge {
+    padding: 6px 12px;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    background: #374151;
+}
+
+.badge.running {
+    background: #065f46;
+    color: #a7f3d0;
+}
+
+.badge.disconnected {
+    background: #7f1d1d;
+    color: #fecaca;
+}
+
+/* 主布局 */
+.main-grid {
+    display: grid;
+    grid-template-columns: 320px 1fr;
+    gap: 20px;
+    padding: 24px;
+    max-width: 1400px;
+    margin: 0 auto;
+}
+
+.card {
+    background: var(--card-bg);
+    border-radius: 12px;
+    padding: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+    margin-bottom: 20px;
+}
+
+.card h3 {
+    margin-top: 0;
+    font-size: 16px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.icon { font-style: normal; }
+
+/* 侧边栏 */
+.sidebar { }
+
+.form-group {
+    margin-bottom: 16px;
+}
+
+.form-group label {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-sub);
+    margin-bottom: 6px;
+}
+
+input {
+    width: 100%;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 14px;
+    box-sizing: border-box;
+    background: #f9fafb;
+}
+
+input:focus {
+    border-color: var(--primary);
+    outline: none;
+}
+
+/* 规则列表 */
+.grid-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.rule-item {
+    background: #f9fafb;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.port-box {
+    background: #111827;
+    color: white;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-family: monospace;
+    font-weight: bold;
+}
+
+.arrow { color: var(--primary); font-weight: bold; }
+
+.target-addr { flex: 1; font-family: monospace; font-size: 13px; color: var(--text-sub); }
+
+/* 表格容器 */
+.table-container {
+    overflow-x: auto;
+}
+
+table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+th {
+    text-align: left;
+    padding: 12px;
+    background: #f9fafb;
+    color: var(--text-sub);
+    font-weight: 600;
+}
+
+td {
+    padding: 12px;
+    border-top: 1px solid var(--border);
+}
+
+.muted { color: var(--text-sub); font-size: 12px; }
+
+/* 登录界面 */
+.login-card {
+    width: 380px;
+    margin: 100px auto;
+    background: white;
+    padding: 40px;
+    border-radius: 16px;
+    box-shadow: 0 10px 25px rgba(0,0,0,0.1);
+    text-align: center;
+}
+
+.login-card .header { margin-bottom: 30px; }
+.login-card .logo { color: var(--primary); font-size: 32px; margin-bottom: 8px; }
+
+/* 按钮 */
+button {
+    cursor: pointer;
+    font-weight: 600;
+    transition: all 0.2s;
+    border: none;
+    font-size: 14px;
+}
+
+button.primary { background: var(--primary); color: white; padding: 12px 24px; border-radius: 8px; }
+button.primary:hover { background: var(--primary-hover); }
+button.block { width: 100%; }
+
+.btn-success { background: var(--success); color: white; padding: 8px 16px; border-radius: 6px; }
+.btn-success:hover { opacity: 0.9; }
+.btn-danger { background: var(--danger); color: white; padding: 8px 16px; border-radius: 6px; }
+
+/* 日志 */
+#log-output {
+    height: 200px;
+    overflow-y: auto;
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 12px;
+    background: #f9fafb;
+    color: #374151;
+    padding: 12px;
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    line-height: 1.5;
+}
+
+#log-output .time { color: #9ca3af; margin-right: 8px; }
+
+.config-actions {
+    margin-top: 24px;
+    border-top: 1px solid var(--border);
+    padding-top: 16px;
+}
+
+.config-actions button {
+    height: 40px;
+}
+
+.error { color: var(--danger); font-size: 12px; margin-top: 10px; }

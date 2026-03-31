@@ -131,7 +131,12 @@ func Run(args []string) {
 
 	mainMux.HandleFunc("/", server.handleHomePage)
 	mainMux.HandleFunc("/client", server.handleClientDownload)
-	mainMux.HandleFunc(config.WEBSOCKET_PATH, server.handleWebSocket)
+	
+	wsPath := config.WEBSOCKET_PATH
+	if wsPath == "" {
+		wsPath = "/proxy_ws"
+	}
+	mainMux.HandleFunc(wsPath, server.handleWebSocket)
 
 	mainMux.HandleFunc("/admin/", server.requireAdminAuth(server.handleAdminDashboard))
 	mainMux.HandleFunc("/admin/login", server.handleAdminLoginPage)
@@ -165,24 +170,34 @@ func Run(args []string) {
 		protocol = "https"
 	}
 
-	// Extract host and port from LISTEN_ADDR
-	_, port, _ := net.SplitHostPort(config.LISTEN_ADDR)
+	listenAddr := config.LISTEN_ADDR
+	if listenAddr == "" {
+		listenAddr = ":8001"
+	}
+
+	// Extract host and port from the actual listen address
+	_, port, _ := net.SplitHostPort(listenAddr)
 	if port == "" {
 		port = "8001"
 	}
 
-	log.Printf("Server starting on %s...", config.LISTEN_ADDR)
+	log.Printf("Server starting on %s...", listenAddr)
 	log.Printf("Home page: %s://127.0.0.1:%s/ (local) | %s://<your-server-ip>:%s/ (public)", protocol, port, protocol, port)
 	log.Printf("Admin panel: %s://127.0.0.1:%s/admin/ (local) | %s://<your-server-ip>:%s/admin/ (public)", protocol, port, protocol, port)
-	log.Printf("WebSocket endpoint: %ss://127.0.0.1:%s%s (local) | %ss://<your-server-ip>:%s%s (public)", protocol, port, config.WEBSOCKET_PATH, protocol, port, config.WEBSOCKET_PATH)
+	
+	wsProtocol := "ws"
+	if protocol == "https" {
+		wsProtocol = "wss"
+	}
+	log.Printf("WebSocket endpoint: %s://127.0.0.1:%s%s (local) | %s://<your-server-ip>:%s%s (public)", wsProtocol, port, wsPath, wsProtocol, port, wsPath)
 
 	if config.TLS_CERT_FILE != "" && config.TLS_KEY_FILE != "" {
 		log.Printf("Using TLS certificates: %s and %s", config.TLS_CERT_FILE, config.TLS_KEY_FILE)
-		if err := http.ListenAndServeTLS(config.LISTEN_ADDR, config.TLS_CERT_FILE, config.TLS_KEY_FILE, mainHandler); err != nil {
+		if err := http.ListenAndServeTLS(listenAddr, config.TLS_CERT_FILE, config.TLS_KEY_FILE, mainHandler); err != nil {
 			log.Fatalf("Server failed to start with TLS: %v", err)
 		}
 	} else {
-		if err := http.ListenAndServe(config.LISTEN_ADDR, mainHandler); err != nil {
+		if err := http.ListenAndServe(listenAddr, mainHandler); err != nil {
 			log.Fatalf("Server failed to start: %v", err)
 		}
 	}

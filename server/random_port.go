@@ -2,6 +2,7 @@ package server
 
 import (
 	"fmt"
+	"log"
 	"math/rand"
 	"net"
 	"strconv"
@@ -55,7 +56,11 @@ func (s *Server) findAvailablePort() (int, error) {
 	}
 
 	if len(allowedPorts) == 0 {
-		return 0, fmt.Errorf("allowed ports list is empty")
+		// If no ports are configured, default to a sensible range
+		log.Println("No ALLOWED_PORTS configured, using default range 10000-20000")
+		for i := 10000; i <= 20000; i++ {
+			allowedPorts = append(allowedPorts, i)
+		}
 	}
 
 	usedPorts := make(map[int]bool)
