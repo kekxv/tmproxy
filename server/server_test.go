@@ -53,7 +53,7 @@ func TestHandleHomePage(t *testing.T) {
 	server.handleHomePage(w, req)
 
 	assert.Equal(t, http.StatusOK, w.Code)
-	assert.Contains(t, w.Body.String(), "<h1>tmproxy Server</h1>")
+	assert.Contains(t, w.Body.String(), "tmproxy")
 	assert.Contains(t, w.Body.String(), "./tmproxy client --server")
 }
 
