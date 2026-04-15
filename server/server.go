@@ -237,18 +237,9 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Determine the port to use:
-	// 1. If Host header contains port, use that (e.g., reverse proxy with specific port)
-	// 2. Otherwise, use the port from config.LISTEN_ADDR
-	// 3. If that also fails, default to "8001"
+	// Only use port from Host header. If no port in Host, don't add one.
+	// This handles reverse proxy scenarios where external URL has no port.
 	port := portFromHost
-	if port == "" {
-		_, configPort, _ := net.SplitHostPort(s.config.LISTEN_ADDR)
-		if configPort != "" {
-			port = configPort
-		} else {
-			port = "8001"
-		}
-	}
 
 	// Determine protocol based on TLS config or X-Forwarded-Proto header (for reverse proxy)
 	proto := "http"
@@ -264,8 +255,15 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 		wsProto = "wss"
 	}
 
-	serverWsURL := fmt.Sprintf("%s://%s:%s%s", wsProto, host, port, s.config.WEBSOCKET_PATH)
-	serverHTTPURL := fmt.Sprintf("%s://%s:%s", proto, host, port)
+	// Build URLs - only include port if it was in the Host header
+	var serverWsURL, serverHTTPURL string
+	if port != "" {
+		serverWsURL = fmt.Sprintf("%s://%s:%s%s", wsProto, host, port, s.config.WEBSOCKET_PATH)
+		serverHTTPURL = fmt.Sprintf("%s://%s:%s", proto, host, port)
+	} else {
+		serverWsURL = fmt.Sprintf("%s://%s%s", wsProto, host, s.config.WEBSOCKET_PATH)
+		serverHTTPURL = fmt.Sprintf("%s://%s", proto, host)
+	}
 
 	tmpl, err := template.ParseFS(frontendFS, "frontend/index.html")
 	if err != nil {
