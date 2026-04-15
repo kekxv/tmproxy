@@ -226,19 +226,46 @@ func (s *Server) handleHomePage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	host, _, _ := net.SplitHostPort(r.Host)
+	host, portFromHost, err := net.SplitHostPort(r.Host)
+	if err != nil {
+		// SplitHostPort fails when there's no port (e.g., "example.com" vs "example.com:8001")
+		// In that case, use the entire r.Host as the hostname
+		host = r.Host
+	}
 	if host == "" {
 		host = "localhost"
 	}
-	_, port, _ := net.SplitHostPort(s.config.LISTEN_ADDR)
-	serverWsURL := fmt.Sprintf("ws://%s:%s%s", host, port, s.config.WEBSOCKET_PATH)
-	if s.config.TLS_CERT_FILE != "" && s.config.TLS_KEY_FILE != "" {
-		serverWsURL = fmt.Sprintf("wss://%s:%s%s", host, port, s.config.WEBSOCKET_PATH)
+
+	// Determine the port to use:
+	// 1. If Host header contains port, use that (e.g., reverse proxy with specific port)
+	// 2. Otherwise, use the port from config.LISTEN_ADDR
+	// 3. If that also fails, default to "8001"
+	port := portFromHost
+	if port == "" {
+		_, configPort, _ := net.SplitHostPort(s.config.LISTEN_ADDR)
+		if configPort != "" {
+			port = configPort
+		} else {
+			port = "8001"
+		}
 	}
-	serverHTTPURL := fmt.Sprintf("http://%s:%s", host, port)
-	if s.config.TLS_CERT_FILE != "" && s.config.TLS_KEY_FILE != "" {
-		serverHTTPURL = fmt.Sprintf("https://%s:%s", host, port)
+
+	// Determine protocol based on TLS config or X-Forwarded-Proto header (for reverse proxy)
+	proto := "http"
+	wsProto := "ws"
+	if forwardedProto := r.Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
+		proto = forwardedProto
+		wsProto = "ws"
+		if proto == "https" {
+			wsProto = "wss"
+		}
+	} else if s.config.TLS_CERT_FILE != "" && s.config.TLS_KEY_FILE != "" {
+		proto = "https"
+		wsProto = "wss"
 	}
+
+	serverWsURL := fmt.Sprintf("%s://%s:%s%s", wsProto, host, port, s.config.WEBSOCKET_PATH)
+	serverHTTPURL := fmt.Sprintf("%s://%s:%s", proto, host, port)
 
 	tmpl, err := template.ParseFS(frontendFS, "frontend/index.html")
 	if err != nil {
